@@ -34,8 +34,8 @@ SERVER_IP = "127.0.0.1"
 # SERVER_PORT_SERVER = 65001  # 本 server 的 server-to-server 端口
 
 # 其他 server 的信息（假设只与 serverB 通信）
-PEER_SERVER_ID = "serverB"
-PEER_SERVER_IP = "127.0.0.1"
+PEER_SERVER_ID = "serverB"# (注意修改)
+PEER_SERVER_IP = "127.0.0.1"# (注意修改)
 PEER_SERVER_PORT = 65001 # (注意修改)
 
 # external_clients 结构: {client_name: {"server_ip": ..., "server_port": ...}}
@@ -189,7 +189,35 @@ def handle_client(conn, addr, name):
                                 }
                                 conn.sendall(json.dumps(response).encode())
                                 continue
-                            if target not in clients:
+                            # 如果target client在本地，则直接转发消息
+                            if target in clients:
+                                out_msg = {
+                                    "type": "message",
+                                    "from": name,
+                                    "to": target,
+                                    "to_type": "user",
+                                    "payload": content,
+                                    "payload_type": "text",
+                                    "timestamp": datetime.now().isoformat()
+                                }
+                                clients[target].sendall(json.dumps(out_msg).encode())
+                                continue
+                            # 如果target client在其他server，则转发消息到其他server
+                            elif target in external_clients:
+                                peer_info = external_clients[target]
+                                out_msg = {
+                                    "type": "message",
+                                    "from": name,
+                                    "to": target,
+                                    "to_type": "user",
+                                    "payload": content,
+                                    "payload_type": "text",
+                                    "timestamp": datetime.now().isoformat()
+                                }
+                                # 转发消息到其他server
+                                forward_message_to_peer(peer_info["server_ip"], peer_info["server_port"], out_msg)
+                                continue
+                            else:
                                 response = {
                                     "type": "message",
                                     "from": "server",
@@ -201,18 +229,6 @@ def handle_client(conn, addr, name):
                                 }
                                 conn.sendall(json.dumps(response).encode())
                                 continue
-                            # 直接转发消息
-                            out_msg = {
-                                "type": "message",
-                                "from": name,
-                                "to": target,
-                                "to_type": "user",
-                                "payload": content,
-                                "payload_type": "text",
-                                "timestamp": datetime.now().isoformat()
-                            }
-                            clients[target].sendall(json.dumps(out_msg).encode())
-                            continue
                     #实现clientA 向clientB 发送文件 格式：/msg_file clientB 文件路径
                     elif payload.startswith('/msg_file '):
                         # 支持 /msg_file <user> <文件路径> 格式
@@ -296,6 +312,23 @@ def handle_client(conn, addr, name):
         del client_ip_table[name]
     print(f"[Server] Current client_ip_table: {client_ip_table}")
 
+'''
+处理其他server 发来的消息
+1. 如果消息是普通消息，则转发到本地client
+2. 如果消息是文件传输请求，则转发到本地client
+'''
+def receive_message_from_peer(msg):
+    if msg.get("type") == "message":
+        recipient = msg["to"]
+        if recipient in clients:
+            clients[recipient].sendall(json.dumps(msg).encode())
+            print(f"[Server] Forwarded message to local client {recipient}")
+        else:
+            print(f"[Server] Received message for unknown client {recipient}")
+    # 未来可扩展更多 type
+    # elif msg.get("type") == "xxx":
+    #     ...
+
 # 处理server 连接
 def server_peer_listener():
     """监听其他 server 的连接"""
@@ -309,7 +342,7 @@ def server_peer_listener():
                 data = conn.recv(4096)
                 msg = json.loads(data.decode())
                 if msg.get("type") == "online_user_request":
-                    # 回复本地在线用户
+                    # 回复其他server 自己本地在线用户列表
                     user_list = list(clients.keys())
                     resp = {
                         "type": "online_user_response",
@@ -317,17 +350,9 @@ def server_peer_listener():
                         "online_users": user_list
                     }
                     conn.sendall(json.dumps(resp).encode())
-                elif msg.get("type") == "message":
-                    # 跨服务器消息转发到本地 client
-                    recipient = msg["to"]
-                    if recipient in clients:
-                        clients[recipient].sendall(json.dumps(msg).encode())
-                        print(f"[Server] Forwarded message to local client {recipient}")
-                    else:
-                        print(f"[Server] Received message for unknown client {recipient}")
                 else:
-                    print(f"[Server] Unknown peer tried to connect: {addr}")
-                    conn.close()
+                    # 统一交给 receive_message_from_peer 处理
+                    receive_message_from_peer(msg)
             except Exception as e:
                 print(f"[Server] Peer handshake failed: {e}")
                 conn.close()
