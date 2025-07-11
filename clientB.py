@@ -5,9 +5,9 @@ import threading
 from datetime import datetime
 import re
 
-#clientA 连接serverA
+#clientB 连接serverB
 HOST = "127.0.0.1"
-PORT = 65432
+PORT = 65433
 
 '''
 receive_messages 方法：

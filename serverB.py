@@ -7,8 +7,8 @@ import re
 
 #server IP and port
 HOST = '127.0.0.1'
-PORT = 65432
-SERVER_PORT=65000
+PORT = 65433
+SERVER_PORT=65001
 
 # 客户端 IP 分配范围
 CLIENT_IP_BASE = '127.0.0.'
@@ -28,7 +28,7 @@ allocated_client_ips = set()
 clients = {}
 
 # ==== 本 Server 配置信息 ====
-SERVER_ID = "serverA"  # 启动时可手动修改为 serverB
+SERVER_ID = "serverB"  # 启动时可手动修改为 serverB
 SERVER_IP = "127.0.0.1"
 # SERVER_PORT_CLIENT = 65000  # 本 server 的 client 端口
 # SERVER_PORT_SERVER = 65001  # 本 server 的 server-to-server 端口
@@ -36,7 +36,7 @@ SERVER_IP = "127.0.0.1"
 # 其他 server 的信息（假设只与 serverB 通信）
 PEER_SERVER_ID = "serverB"
 PEER_SERVER_IP = "127.0.0.1"
-PEER_SERVER_PORT = 65001 # (注意修改)
+PEER_SERVER_PORT = 65000 # (注意修改)
 
 # external_clients 结构: {client_name: {"server_ip": ..., "server_port": ...}}
 external_clients = {}
