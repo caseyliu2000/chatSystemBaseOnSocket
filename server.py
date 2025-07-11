@@ -4,6 +4,7 @@ import threading
 import json
 from datetime import datetime
 import re
+import base64
 
 #server IP and port
 HOST = '127.0.0.1'
@@ -237,7 +238,6 @@ def handle_client(conn, addr, name):
                             target = match.group(1)
                             file_path = match.group(2)
                             if not target or target == name:
-                                # 如果target 是当前用户，则提示错误
                                 response = {
                                     "type": "message",
                                     "from": "server",
@@ -249,8 +249,45 @@ def handle_client(conn, addr, name):
                                 }
                                 conn.sendall(json.dumps(response).encode())
                                 continue
-                            # 如果target 不在线，则提示错误
-                            if target not in clients:
+                            # 读取文件内容并 base64 编码
+                            # maximum file size 10MB
+                            try:
+                                with open(file_path, 'rb') as f:
+                                    file_bytes = f.read(10 * 1024 * 1024 + 1)
+                                if len(file_bytes) > 10 * 1024 * 1024:
+                                    raise Exception("File too large (max 10MB)")
+                                file_b64 = base64.b64encode(file_bytes).decode()
+                            except Exception as e:
+                                response = {
+                                    "type": "message",
+                                    "from": "server",
+                                    "to": name,
+                                    "to_type": "user",
+                                    "payload": f"File error: {e}",
+                                    "payload_type": "text",
+                                    "timestamp": datetime.now().isoformat()
+                                }
+                                conn.sendall(json.dumps(response).encode())
+                                continue
+                            file_request = {
+                                "type": "message_file",
+                                "from": name,
+                                "to": target,
+                                "to_type": "user",
+                                "payload": file_b64,
+                                "payload_type": "file",
+                                "timestamp": datetime.now().isoformat(),
+                                "payload_id": str(hash(datetime.now())),
+                                "file_path": file_path # 相当于file name
+                            }
+                            if target in clients:
+                                clients[target].sendall(json.dumps(file_request).encode())
+                                continue
+                            elif target in external_clients:
+                                peer_info = external_clients[target]
+                                forward_message_to_peer(peer_info["server_ip"], peer_info["server_port"], file_request)
+                                continue
+                            else:
                                 response = {
                                     "type": "message",
                                     "from": "server",
@@ -262,21 +299,6 @@ def handle_client(conn, addr, name):
                                 }
                                 conn.sendall(json.dumps(response).encode())
                                 continue
-                            # 发送文件传输请求
-                            file_request = {
-                                "type": "message_file",
-                                "from": name,
-                                "to": target,
-                                "to_type": "user",
-                                "payload": f"File transfer request: {file_path}",
-                                "payload_type": "file",
-                                "timestamp": datetime.now().isoformat(),
-                                "payload_id": str(hash(datetime.now())),
-                                "file_path": file_path
-                            }
-                            # 发送文件传输 数据
-                            clients[target].sendall(json.dumps(file_request).encode())
-                            continue
                 # 普通消息
                 print(f"[{msg['from']}] ➜ [{msg['to']}] : {msg['payload']}")
                 recipient = msg["to"]
@@ -326,8 +348,13 @@ def receive_message_from_peer(msg):
         else:
             print(f"[Server] Received message for unknown client {recipient}")
     # 未来可扩展更多 type
-    # elif msg.get("type") == "xxx":
-    #     ...
+    elif msg.get("type") == "message_file":
+        recipient = msg["to"]
+        if recipient in clients:
+            clients[recipient].sendall(json.dumps(msg).encode())
+            print(f"[Server] Forwarded file to local client {recipient}")
+        else:
+            print(f"[Server] Received file for unknown client {recipient}")
 
 # 处理server 连接
 def server_peer_listener():
