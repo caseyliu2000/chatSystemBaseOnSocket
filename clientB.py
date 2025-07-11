@@ -33,6 +33,7 @@ def receive_messages(sock):
                     file_path = reply.get("file_path", "unknown_file")
                     filename = os.path.basename(file_path)
                     save_name = f"received_{filename}"
+                    #写入 收到的file
                     try:
                         file_bytes = base64.b64decode(file_b64)
                         with open(save_name, "wb") as f:
