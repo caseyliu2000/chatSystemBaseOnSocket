@@ -9,11 +9,67 @@ import re
 HOST = '127.0.0.1'
 PORT = 65432
 
-#之后会修改成username 和server IP 信息。
-clients = {}  # {name: conn} #conn 是socket connection object
+# 客户端 IP 分配范围
+CLIENT_IP_BASE = '127.0.0.'
+CLIENT_IP_START = 2
+CLIENT_IP_END = 255 * 1 + 254  # 127.0.0.2 - 127.0.0.254
+
+# 本地 client_ip 分配表 {name: client_ip} 保存本地client和client_ip的对应关系
+client_ip_table = {}
+# 已分配的 client_ip set
+allocated_client_ips = set()
+
+# {name: conn} #conn 是socket connection object
+clients = {}
+
+def allocate_client_ip():
+    for i in range(CLIENT_IP_START, CLIENT_IP_END + 1):
+        ip = f'{CLIENT_IP_BASE}{i}'
+        # 如果该ip 没有被分配，则分配给client
+        if ip not in allocated_client_ips:
+            allocated_client_ips.add(ip)
+            return ip
+    return None  # 没有可用 IP
+
+def release_client_ip(ip):
+    allocated_client_ips.discard(ip)
+
+# 其他 server 上 client 信息表（预留，暂不自动同步）
+# {client_name: {"server_ip": ..., "client_ip": ...}}
+external_clients = {}
 
 def handle_client(conn, addr, name):
     print(f"{name} connected from {addr}")
+    # 分配 client_ip
+    client_ip = allocate_client_ip()
+    if not client_ip:
+        response = {
+            "type": "system",
+            "from": "server",
+            "to": name,
+            "to_type": "user",
+            "payload": "No available client IPs. Connection refused.",
+            "payload_type": "text",
+            "timestamp": datetime.now().isoformat()
+        }
+        conn.sendall(json.dumps(response).encode())
+        conn.close()
+        return
+    client_ip_table[name] = client_ip
+    try:
+        response = {
+            "type": "system",
+            "from": "server",
+            "to": name,
+            "to_type": "user",
+            "payload": f"Your assigned client_ip: {client_ip}",
+            "payload_type": "text",
+            "timestamp": datetime.now().isoformat()
+        }
+        conn.sendall(json.dumps(response).encode())
+    except:
+        pass
+    print(f"[Server] Assigned {name} client_ip: {client_ip}")
     while True:
         try:
             data = conn.recv(1024)
@@ -158,6 +214,10 @@ def handle_client(conn, addr, name):
     conn.close()
     if name in clients:
         del clients[name]
+    if name in client_ip_table:
+        release_client_ip(client_ip_table[name])
+        del client_ip_table[name]
+    print(f"[Server] Current client_ip_table: {client_ip_table}")
 
 
 # 主线程监听
@@ -172,3 +232,6 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         name = conn.recv(1024).decode().strip()
         clients[name] = conn
         threading.Thread(target=handle_client, args=(conn, addr, name), daemon=True).start()
+        # 打印当前所有 client_ip
+        print(f"[Server] Current client_ip_table: {client_ip_table}")
+        print(f"[Server] External clients (other servers): {external_clients}")
