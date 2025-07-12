@@ -42,6 +42,12 @@ PEER_SERVER_PORT = 65001 # (注意修改)
 # external_clients 结构: {client_name: {"server_ip": ..., "server_port": ...}}
 external_clients = {}
 
+# ==== Group Management ====
+# groups 结构: {group_name: {"members": [user_names], "creator": creator_name}}
+groups = {}
+# user_groups 结构: {user_name: [group_names]}
+user_groups = {}
+
 def allocate_client_ip():
     for i in range(CLIENT_IP_START, CLIENT_IP_END + 1):
         ip = f'{CLIENT_IP_BASE}{i}'
@@ -53,6 +59,90 @@ def allocate_client_ip():
 
 def release_client_ip(ip):
     allocated_client_ips.discard(ip)
+
+# ==== Group Management Helper Functions ====
+def create_group(group_name, creator_name):
+    """创建新group"""
+    if group_name in groups:
+        return False, "Group already exists"
+    
+    groups[group_name] = {
+        "members": [creator_name],
+        "creator": creator_name
+    }
+    
+    if creator_name not in user_groups:
+        user_groups[creator_name] = []
+    user_groups[creator_name].append(group_name)
+    
+    return True, f"Group '{group_name}' created successfully"
+
+def join_group(group_name, user_name):
+    """用户加入group"""
+    if group_name not in groups:
+        return False, "Group does not exist"
+    
+    if user_name in groups[group_name]["members"]:
+        return False, "You are already a member of this group"
+    
+    groups[group_name]["members"].append(user_name)
+    
+    if user_name not in user_groups:
+        user_groups[user_name] = []
+    user_groups[user_name].append(group_name)
+    
+    return True, f"Successfully joined group '{group_name}'"
+
+def delete_group(group_name, user_name):
+    """删除group（只有创建者可以删除）"""
+    if group_name not in groups:
+        return False, "Group does not exist"
+    
+    if groups[group_name]["creator"] != user_name:
+        return False, "Only the group creator can delete the group"
+    
+    # 从所有成员的user_groups中移除该group
+    for member in groups[group_name]["members"]:
+        if member in user_groups and group_name in user_groups[member]:
+            user_groups[member].remove(group_name)
+    
+    # 删除group
+    del groups[group_name]
+    
+    return True, f"Group '{group_name}' deleted successfully"
+
+def get_group_list():
+    """获取所有group列表"""
+    if not groups:
+        return "No groups exist"
+    
+    group_info = []
+    for group_name, group_data in groups.items():
+        member_count = len(group_data["members"])
+        creator = group_data["creator"]
+        group_info.append(f"'{group_name}' (members: {member_count}, creator: {creator})")
+    
+    return "Groups: " + "; ".join(group_info)
+
+def is_user_in_group(user_name, group_name):
+    """检查用户是否在group中"""
+    return group_name in groups and user_name in groups[group_name]["members"]
+
+def remove_user_from_all_groups(user_name):
+    """用户断开连接时，从所有group中移除"""
+    if user_name not in user_groups:
+        return
+    
+    groups_to_remove_from = user_groups[user_name].copy()
+    for group_name in groups_to_remove_from:
+        if group_name in groups and user_name in groups[group_name]["members"]:
+            groups[group_name]["members"].remove(user_name)
+            # 如果group为空，删除group
+            if not groups[group_name]["members"]:
+                del groups[group_name]
+    
+    # 清理user_groups
+    del user_groups[user_name]
 
 '''
 将消息转发到其他 server（短连接）
@@ -107,6 +197,10 @@ def request_peer_online_users():
 3. 启动client-to-server 处理线程
 5. 打印当前所有 client_ip
 6. 打印当前所有 external_clients
+
+conn 是client的socket connection object
+addr 是client 的地址
+name 是client 的name
 '''
 def handle_client(conn, addr, name):
     print(f"{name} connected from {addr}")
@@ -122,9 +216,11 @@ def handle_client(conn, addr, name):
             "payload_type": "text",
             "timestamp": datetime.now().isoformat()
         }
+        #发送系统消息，给client 发送拒绝连接的消息
         conn.sendall(json.dumps(response).encode())
         conn.close()
         return
+    #保存client ip 和 name 的对应关系
     client_ip_table[name] = client_ip
     try:
         response = {
@@ -140,6 +236,8 @@ def handle_client(conn, addr, name):
     except:
         pass
     print(f"[Server] Assigned {name} client_ip: {client_ip}")
+
+    #============= 等待client 发送消息 =============
     while True:
         try:
             data = conn.recv(1024)
@@ -152,8 +250,23 @@ def handle_client(conn, addr, name):
 
                 # 命令处理
                 if payload_type == 'command':
+                    # ==== Group Management Commands ====
+                    # 列出所有group 格式：/list_group
+                    if payload.startswith('/list_group'):
+                        group_list = get_group_list()
+                        response = {
+                            "type": "message",
+                            "from": "server",
+                            "to": name,
+                            "to_type": "user",
+                            "payload": group_list,
+                            "payload_type": "text",
+                            "timestamp": datetime.now().isoformat()
+                        }
+                        conn.sendall(json.dumps(response).encode())
+                        continue
                     #显示当前所有online 用户
-                    if payload.startswith('/list'):
+                    elif payload.startswith('/list'):
                         # 本地在线用户（除自己外）
                         online_users = [u for u in clients.keys() if u != name]
                         # 请求 serverB 的在线用户
@@ -299,26 +412,203 @@ def handle_client(conn, addr, name):
                                 }
                                 conn.sendall(json.dumps(response).encode())
                                 continue
-                # 普通消息
-                print(f"[{msg['from']}] ➜ [{msg['to']}] : {msg['payload']}")
-                recipient = msg["to"]
-                if recipient in clients:
-                    clients[recipient].sendall(json.dumps(msg).encode())
-                elif recipient in external_clients:
-                    # 跨服务器转发
-                    peer_info = external_clients[recipient]
-                    forward_message_to_peer(peer_info["server_ip"], peer_info["server_port"], msg)
+                    # ==== Group Management Commands ====
+                    # 创建group 格式：/create_group <group_name>
+                    elif payload.startswith('/create_group '):
+                        match = re.match(r'/create_group\s+(\S+)', payload)
+                        if match:
+                            group_name = match.group(1)
+                            success, message = create_group(group_name, name)
+                            response = {
+                                "type": "message",
+                                "from": "server",
+                                "to": name,
+                                "to_type": "user",
+                                "payload": message,
+                                "payload_type": "text",
+                                "timestamp": datetime.now().isoformat()
+                            }
+                            conn.sendall(json.dumps(response).encode())
+                        else:
+                            response = {
+                                "type": "message",
+                                "from": "server",
+                                "to": name,
+                                "to_type": "user",
+                                "payload": "Usage: /create_group <group_name>",
+                                "payload_type": "text",
+                                "timestamp": datetime.now().isoformat()
+                            }
+                            conn.sendall(json.dumps(response).encode())
+                        continue
+                    # 加入group 格式：/join_group <group_name>
+                    elif payload.startswith('/join_group '):
+                        match = re.match(r'/join_group\s+(\S+)', payload)
+                        if match:
+                            group_name = match.group(1)
+                            success, message = join_group(group_name, name)
+                            response = {
+                                "type": "message",
+                                "from": "server",
+                                "to": name,
+                                "to_type": "user",
+                                "payload": message,
+                                "payload_type": "text",
+                                "timestamp": datetime.now().isoformat()
+                            }
+                            conn.sendall(json.dumps(response).encode())
+                        else:
+                            response = {
+                                "type": "message",
+                                "from": "server",
+                                "to": name,
+                                "to_type": "user",
+                                "payload": "Usage: /join_group <group_name>",
+                                "payload_type": "text",
+                                "timestamp": datetime.now().isoformat()
+                            }
+                            conn.sendall(json.dumps(response).encode())
+                        continue
+
+                    # 删除group 格式：/delete_group <group_name>
+                    elif payload.startswith('/delete_group '):
+                        match = re.match(r'/delete_group\s+(\S+)', payload)
+                        if match:
+                            group_name = match.group(1)
+                            success, message = delete_group(group_name, name)
+                            response = {
+                                "type": "message",
+                                "from": "server",
+                                "to": name,
+                                "to_type": "user",
+                                "payload": message,
+                                "payload_type": "text",
+                                "timestamp": datetime.now().isoformat()
+                            }
+                            conn.sendall(json.dumps(response).encode())
+                            
+                            # 如果删除成功，通知所有group成员
+                            if success:
+                                # 在删除group之前保存成员列表
+                                members_to_notify = groups[group_name]["members"].copy()
+                                for member in members_to_notify:
+                                    if member != name and member in clients:
+                                        notification = {
+                                            "type": "message",
+                                            "from": "server",
+                                            "to": member,
+                                            "to_type": "user",
+                                            "payload": f"Group '{group_name}' has been deleted by the creator.",
+                                            "payload_type": "text",
+                                            "timestamp": datetime.now().isoformat()
+                                        }
+                                        clients[member].sendall(json.dumps(notification).encode())
+                        else:
+                            response = {
+                                "type": "message",
+                                "from": "server",
+                                "to": name,
+                                "to_type": "user",
+                                "payload": "Usage: /delete_group <group_name>",
+                                "payload_type": "text",
+                                "timestamp": datetime.now().isoformat()
+                            }
+                            conn.sendall(json.dumps(response).encode())
+                        continue
+                    # 向group发送消息 格式：/msg_group <group_name> <message>
+                    elif payload.startswith('/msg_group '):
+                        match = re.match(r'/msg_group\s+(\S+)\s+(.+)', payload)
+                        if match:
+                            group_name = match.group(1)
+                            content = match.group(2)
+                            
+                            if not is_user_in_group(name, group_name):
+                                response = {
+                                    "type": "message",
+                                    "from": "server",
+                                    "to": name,
+                                    "to_type": "user",
+                                    "payload": f"You are not a member of group '{group_name}'",
+                                    "payload_type": "text",
+                                    "timestamp": datetime.now().isoformat()
+                                }
+                                conn.sendall(json.dumps(response).encode())
+                                continue
+                            
+                            # 构造group消息
+                            group_msg = {
+                                "type": "group_message",
+                                "from": name,
+                                "to": group_name,
+                                "to_type": "group",
+                                "content": content,
+                                "content_type": "text",
+                                "timestamp": datetime.now().isoformat()
+                            }
+                            
+                            # 向group内所有成员（除发送者外）转发消息
+                            for member in groups[group_name]["members"]:
+                                #不发送给自己，只发给除自己外的其他local client. 
+                                if member != name and member in clients:
+                                    clients[member].sendall(json.dumps(group_msg).encode())
+                                #后面加入发送给其他server的group member功能
+                                #......
+                                
+                            print(f"[{name}] ➜ [Group:{group_name}] : {content}")
+                        else:
+                            response = {
+                                "type": "message",
+                                "from": "server",
+                                "to": name,
+                                "to_type": "user",
+                                "payload": "Usage: /msg_group <group_name> <message>",
+                                "payload_type": "text",
+                                "timestamp": datetime.now().isoformat()
+                            }
+                            conn.sendall(json.dumps(response).encode())
+                        continue
+                # 普通消息和group消息处理
+                if msg.get("type") == "group_message":
+                    # 处理group消息
+                    group_name = msg["to"]
+                    if group_name in groups:
+                        # 向group内所有成员（除发送者外）转发消息
+                        for member in groups[group_name]["members"]:
+                            if member != msg["from"] and member in clients:
+                                clients[member].sendall(json.dumps(msg).encode())
+                        print(f"[{msg['from']}] ➜ [Group:{group_name}] : {msg['content']}")
+                    else:
+                        warning = {
+                            "type": "message",
+                            "from": "server",
+                            "to": msg["from"],
+                            "to_type": "user",
+                            "payload": f"Group {group_name} does not exist.",
+                            "payload_type": "text",
+                            "timestamp": datetime.now().isoformat()
+                        }
+                        conn.sendall(json.dumps(warning).encode())
                 else:
-                    warning = {
-                        "type": "message",
-                        "from": "server",
-                        "to": msg["from"],
-                        "to_type": "user",
-                        "payload": f"User {recipient} is not online.",
-                        "payload_type": "text",
-                        "timestamp": datetime.now().isoformat()
-                    }
-                    conn.sendall(json.dumps(warning).encode())
+                    # 处理普通消息
+                    print(f"[{msg['from']}] ➜ [{msg['to']}] : {msg['payload']}")
+                    recipient = msg["to"]
+                    if recipient in clients:
+                        clients[recipient].sendall(json.dumps(msg).encode())
+                    elif recipient in external_clients:
+                        # 跨服务器转发
+                        peer_info = external_clients[recipient]
+                        forward_message_to_peer(peer_info["server_ip"], peer_info["server_port"], msg)
+                    else:
+                        warning = {
+                            "type": "message",
+                            "from": "server",
+                            "to": msg["from"],
+                            "to_type": "user",
+                            "payload": f"User {recipient} is not online.",
+                            "payload_type": "text",
+                            "timestamp": datetime.now().isoformat()
+                        }
+                        conn.sendall(json.dumps(warning).encode())
             except Exception as e:
                 print("JSON decode failed:", e)
                 continue
@@ -332,7 +622,13 @@ def handle_client(conn, addr, name):
     if name in client_ip_table:
         release_client_ip(client_ip_table[name])
         del client_ip_table[name]
+    
+    # 清理group信息
+    remove_user_from_all_groups(name)
+    
     print(f"[Server] Current client_ip_table: {client_ip_table}")
+    print(f"[Server] Current groups: {groups}")
+    print(f"[Server] Current user_groups: {user_groups}")
 
 '''
 处理其他server 发来的消息

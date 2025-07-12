@@ -1,49 +1,195 @@
-# Chat System Basic (Socket Version)
+# Chat System with Group Messaging
 
-本项目是一个基于 Python socket 的简易聊天系统，包含 server.py（服务器端）和 client.py（客户端）。支持多客户端连接、消息收发、用户列表、点对点消息和文件传输命令。
+A multi-server chat system with group messaging capabilities, built with Python sockets and JSON messaging.
 
-## 主要功能
+## System Architecture
 
-### server.py
-- 监听指定 IP 和端口，等待客户端连接。
-- 为每个新连接的 client 分配唯一的 client_ip（127.0.0.2 ~ 127.0.0.254），并记录在 `client_ip_table`。
-- 为每个 client 创建独立的 socket 连接对象（conn），通过该对象与 client 通信。
-- 所有 server 与 client 的消息均采用 JSON 格式，便于解析。
-- 支持命令：
-  - `/list` 查看在线用户
-  - `/msg <user> <content>` 点对点消息
-  - `/msg_file <user> <file>` 点对点文件传输请求
-- 客户端断开时，自动回收 client_ip 并清理资源。
-- 预留 `external_clients` 字典，用于后续扩展跨服务器 client 信息同步。
+The system consists of multiple servers that can communicate with each other:
+- **server.py** (serverA) - Runs on port 65432, server-to-server port 65000
+- **serverB.py** (serverB) - Runs on port 65433, server-to-server port 65001
+- **client.py** - Connects to serverA (port 65432)
+- **clientB.py** - Connects to serverB (port 65433)
 
-### client.py
-- 连接到指定的 server（IP 和端口）。
-- 输入用户名后，接收 server 分配的 client_ip。
-- 支持命令行交互：
-  - `/list` 查看在线用户
-  - `/msg <user> <content>` 发送消息给指定用户
-  - `/msg_file <user> <file>` 发送文件请求给指定用户
-  - `/quit` 退出
-- 所有与 server 的通信均通过 socket 进行，消息采用 JSON 格式。
-- 能正确解析 server 返回的 JSON 消息。
+## Features
 
-## 运行方式
+### 1. User Management
+- **User Registration**: Users connect with a unique username
+- **Client IP Assignment**: Each user gets assigned a unique client IP (127.0.0.x)
+- **Online User Discovery**: `/list` command shows all online users across servers
+- **Cross-Server Communication**: Users can send messages to users on other servers
 
-1. 启动一个或多个 server：
+### 2. Private Messaging
+- **Direct Messages**: `/msg <user> <message>` - Send private message to specific user
+- **File Sharing**: `/msg_file <user> <file_path>` - Send files up to 10MB
+- **Cross-Server Support**: Messages and files can be sent between users on different servers
+
+### 3. Group Messaging System
+
+#### Group Management Commands
+- **Create Group**: `/create_group <group_name>` - Create a new group (creator automatically joins)
+- **Join Group**: `/join_group <group_name>` - Join an existing group
+- **List Groups**: `/list_group` - Show all groups on current server with member count and creator
+- **Delete Group**: `/delete_group <group_name>` - Delete group (creator only)
+- **Group Messages**: `/msg_group <group_name> <message>` - Send message to all group members
+
+#### Group Features
+- **Server-Local Groups**: Groups exist only on the server where they were created
+- **Creator Permissions**: Only group creators can delete groups
+- **Automatic Cleanup**: Users are removed from groups when they disconnect
+- **Member Validation**: Only group members can send messages to the group
+
+### 4. Server-to-Server Communication
+- **Peer Discovery**: Servers can discover online users on other servers
+- **Message Forwarding**: Messages are automatically forwarded between servers
+- **File Transfer**: Files can be transferred across server boundaries
+
+## Message Formats
+
+### Private Messages
+```json
+{
+    "type": "message",
+    "from": "userA",
+    "to": "userB",
+    "to_type": "user",
+    "payload": "Hello!",
+    "payload_type": "text",
+    "timestamp": "2025-01-01T00:00:00Z"
+}
+```
+
+### Group Messages
+```json
+{
+    "type": "group_message",
+    "from": "userA",
+    "to": "GroupName",
+    "to_type": "group",
+    "content": "Hello everyone!",
+    "content_type": "text",
+    "timestamp": "2025-01-01T00:00:00Z"
+}
+```
+
+### File Messages
+```json
+{
+    "type": "message_file",
+    "from": "userA",
+    "to": "userB",
+    "to_type": "user",
+    "payload": "base64_encoded_file_content",
+    "payload_type": "file",
+    "timestamp": "2025-01-01T00:00:00Z",
+    "payload_id": "unique_id",
+    "file_path": "filename.txt"
+}
+```
+
+## Data Structures
+
+### Server-Side Storage
+- `clients`: `{user_name: connection_object}` - Active user connections
+- `client_ip_table`: `{user_name: client_ip}` - User to IP mapping
+- `external_clients`: `{user_name: {"server_ip": ..., "server_port": ...}}` - Users on other servers
+- `groups`: `{group_name: {"members": [user_names], "creator": creator_name}}` - Group information
+- `user_groups`: `{user_name: [group_names]}` - User's group memberships
+
+## Usage
+
+### Starting the System
+
+1. **Start serverA**:
    ```bash
    python server.py
    ```
-2. 启动一个或多个 client，连接到 server：
+
+2. **Start serverB** (optional, for multi-server setup):
    ```bash
-   python client.py
+   python serverB.py
    ```
-3. 按提示输入用户名，使用命令进行聊天。
 
-## 注意事项
-- server.py 和 client.py 需在 Python 3 环境下运行。
-- 多个 server 可以在不同终端/窗口运行，模拟分布式场景。
-- 当前版本未实现服务器间的自动同步和转发，仅支持单 server 内部通信。
-- 所有消息均为 JSON 格式，client 需正确解析。
+3. **Connect clients**:
+   ```bash
+   python client.py    # Connects to serverA
+   python clientB.py   # Connects to serverB
+   ```
 
----
-如需扩展跨服务器通信或有其他需求，请参考代码中的 `external_clients` 相关注释。 
+### Available Commands
+
+#### User Commands
+- `/list` - List all online users across servers
+- `/msg <user> <message>` - Send private message
+- `/msg_file <user> <file_path>` - Send file to user
+- `/quit` - Disconnect from server
+
+#### Group Commands
+- `/create_group <name>` - Create new group
+- `/join_group <name>` - Join existing group
+- `/list_group` - List all groups on current server
+- `/msg_group <group> <message>` - Send message to group
+- `/delete_group <name>` - Delete group (creator only)
+
+### Example Session
+
+```
+Enter your name: Alice
+You are connected. Available commands:
+  /list - List online users
+  /msg <user> <content> - Send message to user
+  /msg_file <user> <file> - Send file to user
+  /create_group <name> - Create a new group
+  /join_group <name> - Join an existing group
+  /list_group - List all groups
+  /msg_group <group> <message> - Send message to group
+  /delete_group <name> - Delete a group (creator only)
+  /quit - Exit
+
+Command: /create_group TeamA
+[server] ➜ You: Group 'TeamA' created successfully
+
+Command: /list_group
+[server] ➜ You: Groups: 'TeamA' (members: 1, creator: Alice)
+
+Command: /msg_group TeamA Hello everyone!
+[Group:TeamA] Alice: Hello everyone!
+
+Command: /list
+[server] ➜ You: Online users: Bob, Charlie
+```
+
+## Technical Details
+
+### Network Configuration
+- **Client Ports**: 65432 (serverA), 65433 (serverB)
+- **Server-to-Server Ports**: 65000 (serverA), 65001 (serverB)
+- **Client IP Range**: 127.0.0.2 - 127.0.0.254
+
+### Error Handling
+- **Connection Refusal**: When no client IPs are available
+- **Invalid Commands**: Helpful error messages for malformed commands
+- **File Validation**: File size limits (10MB) and existence checks
+- **Group Validation**: Permission checks for group operations
+
+### Security Features
+- **Input Validation**: All commands are validated before processing
+- **Permission Control**: Group deletion restricted to creators
+- **Resource Management**: Automatic cleanup of disconnected users
+
+## Limitations
+
+1. **Server-Local Groups**: Groups are not shared across servers
+2. **No Persistence**: All data is lost on server restart
+3. **No Authentication**: No user authentication or authorization
+4. **Limited File Types**: No file type validation
+5. **Single Thread per Client**: Each client connection uses one thread
+
+## Future Enhancements
+
+- Cross-server group messaging
+- Persistent storage for groups and user data
+- User authentication and authorization
+- File type validation and virus scanning
+- Real-time notifications
+- Message history and search
+- User profiles and avatars 

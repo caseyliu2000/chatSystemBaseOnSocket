@@ -45,9 +45,11 @@ def receive_messages(sock):
                     print(f"\n[{reply['from']}] ➜ You: {reply['payload']}")
                 elif reply.get('payload_type') == 'file':
                     print(f"\n[{reply['from']}] wants to send you a file: {reply.get('file_path', 'unknown')}")
+                elif reply.get('type') == 'group_message':
+                    print(f"\n[Group:{reply['to']}] {reply['from']}: {reply['content']}")
                 else:
                     print(f"\n[{reply['from']}] ➜ You: {reply['payload']}")
-                print("Command (/list, /msg <user> content, /msg_file <user> <file>, /quit): ", end="", flush=True)
+                print("Command (/list, /msg <user> content, /msg_file <user> <file>, /create_group <name>, /join_group <name>, /list_group, /msg_group <group> <message>, /delete_group <name>, /quit): ", end="", flush=True)
             except Exception as e:
                 print(f"\nError receiving message: {e}")
                 break
@@ -66,6 +68,8 @@ main 方法：
         4.4 处理/msg_file命令
         4.5 处理/quit命令
         4.6 处理未知命令
+
+发送信息给server.
 '''
 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
     s.connect((HOST, PORT))
@@ -73,13 +77,22 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
     name = input(name_prompt).strip()
     s.sendall(name.encode())
 
-    print("You are connected. Use /list to see users, /msg <user> content to chat, /msg_file <user> <file> to send files, /quit to exit.")
+    print("You are connected. Available commands:")
+    print("  /list - List online users")
+    print("  /msg <user> <content> - Send message to user")
+    print("  /msg_file <user> <file> - Send file to user")
+    print("  /create_group <name> - Create a new group")
+    print("  /join_group <name> - Join an existing group")
+    print("  /list_group - List all groups")
+    print("  /msg_group <group> <message> - Send message to group")
+    print("  /delete_group <name> - Delete a group (creator only)")
+    print("  /quit - Exit")
     receive_thread = threading.Thread(target=receive_messages, args=(s,), daemon=True)
     receive_thread.start()
 
     while True:
         try:
-            cmd = input("Command (/list, /msg <user> content, /msg_file <user> <file>, /quit): ").strip()
+            cmd = input("Command: ").strip()
             if cmd.lower() == '/quit':
                 break
             if cmd.lower() == '/list':
@@ -135,7 +148,81 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 }
                 s.sendall(json.dumps(file_cmd).encode())
                 continue
-            print("Unknown command. Use /list, /msg <user> content, /msg_file <user> <file>, or /quit.")
+            # ==== Group Management Commands ====
+            # 创建group 格式：/create_group <group_name>
+            create_group_match = re.match(r'/create_group\s+(\S+)', cmd)
+            if create_group_match:
+                group_name = create_group_match.group(1)
+                group_cmd = {
+                    "from": name,
+                    "to": "server",
+                    "payload": f"/create_group {group_name}",
+                    "payload_type": "command",
+                    "timestamp": datetime.now().isoformat()
+                }
+                s.sendall(json.dumps(group_cmd).encode())
+                continue
+            # 加入group 格式：/join_group <group_name>
+            join_group_match = re.match(r'/join_group\s+(\S+)', cmd)
+            if join_group_match:
+                group_name = join_group_match.group(1)
+                group_cmd = {
+                    "from": name,
+                    "to": "server",
+                    "payload": f"/join_group {group_name}",
+                    "payload_type": "command",
+                    "timestamp": datetime.now().isoformat()
+                }
+                s.sendall(json.dumps(group_cmd).encode())
+                continue
+            # 列出所有group 格式：/list_group
+            if cmd.lower() == '/list_group':
+                group_cmd = {
+                    "from": name,
+                    "to": "server",
+                    "payload": "/list_group",
+                    "payload_type": "command",
+                    "timestamp": datetime.now().isoformat()
+                }
+                s.sendall(json.dumps(group_cmd).encode())
+                continue
+            # 删除group 格式：/delete_group <group_name>
+            delete_group_match = re.match(r'/delete_group\s+(\S+)', cmd)
+            if delete_group_match:
+                group_name = delete_group_match.group(1)
+                group_cmd = {
+                    "from": name,
+                    "to": "server",
+                    "payload": f"/delete_group {group_name}",
+                    "payload_type": "command",
+                    "timestamp": datetime.now().isoformat()
+                }
+                s.sendall(json.dumps(group_cmd).encode())
+                continue
+            # 向group发送消息 格式：/msg_group <group_name> <message>
+            msg_group_match = re.match(r'/msg_group\s+(\S+)\s+(.+)', cmd)
+            if msg_group_match:
+                group_name = msg_group_match.group(1)
+                content = msg_group_match.group(2)
+                group_cmd = {
+                    "from": name,
+                    "to": "server",
+                    "payload": f"/msg_group {group_name} {content}",
+                    "payload_type": "command",
+                    "timestamp": datetime.now().isoformat()
+                }
+                s.sendall(json.dumps(group_cmd).encode())
+                continue
+            print("Unknown command. Available commands:")
+            print("  /list - List online users")
+            print("  /msg <user> <content> - Send message to user")
+            print("  /msg_file <user> <file> - Send file to user")
+            print("  /create_group <name> - Create a new group")
+            print("  /join_group <name> - Join an existing group")
+            print("  /list_group - List all groups")
+            print("  /msg_group <group> <message> - Send message to group")
+            print("  /delete_group <name> - Delete a group (creator only)")
+            print("  /quit - Exit")
         except KeyboardInterrupt:
             print("\nDisconnecting...")
             break
