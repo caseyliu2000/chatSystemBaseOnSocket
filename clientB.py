@@ -7,9 +7,9 @@ import re
 import base64
 import os
 
-#clientA 连接serverA
+#clientB 连接serverB
 HOST = "127.0.0.1"
-PORT = 65432
+PORT = 65433
 
 '''
 receive_messages 方法：
@@ -33,9 +33,9 @@ def receive_messages(sock):
                     file_path = reply.get("file_path", "unknown_file")
                     filename = os.path.basename(file_path)
                     save_name = f"received_{filename}"
+                    #写入 收到的file
                     try:
                         file_bytes = base64.b64decode(file_b64)
-                        #写入，传来的文件。
                         with open(save_name, "wb") as f:
                             f.write(file_bytes)
                         print(f"[File] Received file saved as {save_name}")
@@ -56,6 +56,7 @@ def receive_messages(sock):
         except Exception as e:
             print(f"\nError receiving message: {e}")
             break
+
 '''
 main 方法：
     1. 连接到server
@@ -68,8 +69,6 @@ main 方法：
         4.4 处理/msg_file命令
         4.5 处理/quit命令
         4.6 处理未知命令
-
-发送信息给server.
 '''
 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
     s.connect((HOST, PORT))
@@ -134,7 +133,6 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                     print("Invalid target user.")
                     continue
                 # 检查文件是否存在
-                import os
                 if not os.path.exists(file_path):
                     print(f"File not found: {file_path}")
                     continue
