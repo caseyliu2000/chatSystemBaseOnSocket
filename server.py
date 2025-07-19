@@ -25,7 +25,8 @@ client_ip_table = {}
 # 已分配的 client_ip set
 allocated_client_ips = set()
 
-# {name: conn} #conn 是socket connection object
+#【old】 {name: conn} #conn 是socket connection object
+#【new】 {name: {passwd: xx, online: bool, sobj: conn}, name:{..}, ..}
 clients = {}
 
 # ==== 本 Server 配置信息 ====
@@ -618,7 +619,7 @@ def handle_client(conn, addr, name):
     print(f"{name} disconnected")
     conn.close()
     if name in clients:
-        del clients[name]
+        clients[name]['online'] = False
     if name in client_ip_table:
         release_client_ip(client_ip_table[name])
         del client_ip_table[name]
@@ -627,6 +628,7 @@ def handle_client(conn, addr, name):
     remove_user_from_all_groups(name)
     
     print(f"[Server] Current client_ip_table: {client_ip_table}")
+    print(f"[Server] Current clients: {clients}")
     print(f"[Server] Current groups: {groups}")
     print(f"[Server] Current user_groups: {user_groups}")
 
@@ -681,6 +683,36 @@ def server_peer_listener():
                 conn.close()
 
 
+# 检测name与passwd是否一致
+def login_check(name, passwd):
+    correct_passwd = clients[name]['passwd']
+    if passwd==correct_passwd:
+        return True
+    else:
+        return False
+
+
+# 检测用户名是否存在
+def name_check(name):
+    # 本地用户
+    online_users = [u for u in clients.keys()]
+    # 请求 serverB 的在线用户
+    peer_users = request_peer_online_users()
+    # 合并所有用户
+    all_users = online_users + peer_users
+    
+    print(f"[Server] all user: {clients}")
+    
+    if name in all_users:
+        #name存在
+        return True
+    else:
+        #name不存在
+        return False
+
+
+
+
 # 主线程监听
 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
     s.bind((HOST, PORT))
@@ -689,9 +721,59 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
 
     while True:
         conn, addr = s.accept()
-        conn.sendall("Enter your name:".encode())
-        name = conn.recv(1024).decode().strip()
-        clients[name] = conn
+        
+        #1.用户登录检测
+        auth_bool = False
+        name = None
+        passwd = None
+        
+        while not auth_bool:
+            conn.sendall("login or register:".encode())
+            action = conn.recv(1024).decode().strip()
+            
+            if action == 'login':
+                conn.sendall("input name:".encode())
+                name = conn.recv(1024).decode().strip()
+                
+                name_result = name_check(name)
+                if name_result == True:
+                    conn.sendall("input password:".encode())
+                    passwd = conn.recv(1024).decode().strip()
+
+                    login_result = login_check(name, passwd)
+                    if login_result == True:
+                        clients[name]['sobj'] = conn
+                        conn.sendall("login success.".encode())
+                        auth_bool = True
+                    elif login_result == False:
+                        # while跳过这一次
+                        conn.sendall("password is wrong.".encode())
+                        continue
+                elif name_result == False:
+                    conn.sendall("name is not exist, please try again.".encode())
+                    continue
+            
+            elif action == 'register':
+                conn.sendall("input name:".encode())
+                name = conn.recv(1024).decode().strip()
+                
+                name_result = name_check(name)
+                if name_result == False:
+                    conn.sendall("input password:".encode())
+                    passwd = conn.recv(1024).decode().strip()
+                    
+                    clients[name] = {'passwd':passwd,'online':True, 'sobj':conn}
+                    auth_bool = True
+                elif name_result == True:
+                    conn.sendall("name already used, please try another one.".encode())
+                    continue
+                    
+            else:
+                continue
+            
+            
+        
+        #2.登录成功，可以进行操作
         # 启动 client-to-server 处理线程
         threading.Thread(target=handle_client, args=(conn, addr, name), daemon=True).start()
 
