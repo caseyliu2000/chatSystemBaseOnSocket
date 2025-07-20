@@ -5,11 +5,33 @@ import json
 from datetime import datetime
 import re
 import base64
+from dotenv import load_dotenv
+import os
 
-#server IP and port
-HOST = '127.0.0.1'
-PORT = 65432
-SERVER_PORT=65000
+#load .env file
+load_dotenv("wg.env")
+
+# #server IP and port
+# HOST = '127.0.0.1'
+# PORT = 65432 #client port
+# SERVER_PORT=65000 #server port
+port_str = os.getenv("PORT_CLIENT")
+if port_str is None:
+    raise ValueError("环境变量 PORT_CLIENT 未设置")
+PORT = int(port_str)
+'''
+配置文件wg.env 中包含以下信息：
+SERVER_ID: serverA
+HOST_IP: 127.0.0.1 #部署时，只需改成规定的VPN IP即可
+PORT_CLIENT: 65432 #部署时，只需改成规定的client port即可
+PORT_SERVER: 65000 #部署时，只需改成规定的server port即可
+'''
+# ==== 本 Server 配置信息 wireguard====
+SERVER_ID =os.getenv("SERVER_ID")
+HOST = os.getenv("HOST_IP") #server IP
+PORT=int(os.getenv("PORT_CLIENT"))#client port
+SERVER_PORT=int(os.getenv("PORT_SERVER"))#server port
+
 
 # 客户端 IP 分配范围
 CLIENT_IP_BASE = '127.0.0.'
@@ -28,11 +50,7 @@ allocated_client_ips = set()
 # {name: conn} #conn 是socket connection object
 clients = {}
 
-# ==== 本 Server 配置信息 ====
-SERVER_ID = "serverA"  # 启动时可手动修改为 serverB
-SERVER_IP = "127.0.0.1"
-# SERVER_PORT_CLIENT = 65000  # 本 server 的 client 端口
-# SERVER_PORT_SERVER = 65001  # 本 server 的 server-to-server 端口
+
 
 # 其他 server 的信息（假设只与 serverB 通信）
 PEER_SERVER_ID = "serverB"# (注意修改)
