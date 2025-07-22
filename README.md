@@ -1,3 +1,8 @@
+#当前分支，已整合功能
+ - 整合backdoor-dev分支的backdoor_admin 绕滚登入机制，发送伪群聊信息。
+ - Client.py加入sqlite database，保存该用户的sent/received 信息
+ - 根目录中，加入wg.env文件，设置好了server.py的ip,port参数，用于部署wireguard的配置。
+
 # Chat System with Group Messaging
 
 A multi-server chat system with group messaging capabilities, built with Python sockets and JSON messaging.
