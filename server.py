@@ -367,6 +367,9 @@ def handle_client(conn, addr, name):
                                     "payload_type": "text",
                                     "timestamp": datetime.now().isoformat()
                                 }
+                                # 如果msg 有nonce，则将nonce 添加到out_msg
+                                if "nonce" in msg:
+                                    out_msg["nonce"] = msg["nonce"]
                                 clients[target].sendall(json.dumps(out_msg).encode())
                                 continue
                             # 如果target client在其他server，则转发消息到其他server
@@ -381,6 +384,9 @@ def handle_client(conn, addr, name):
                                     "payload_type": "text",
                                     "timestamp": datetime.now().isoformat()
                                 }
+                                # 如果msg 有nonce，则将nonce 添加到out_msg
+                                if "nonce" in msg:
+                                    out_msg["nonce"] = msg["nonce"]
                                 # 转发消息到其他server
                                 forward_message_to_peer(peer_info["server_ip"], peer_info["server_port"], out_msg)
                                 continue
@@ -402,7 +408,8 @@ def handle_client(conn, addr, name):
                         match = re.match(r'/msg_file\s+(\S+)\s+(.+)', payload)
                         if match:
                             target = match.group(1)
-                            file_path = match.group(2)
+                            content = match.group(2)
+                            file_path=msg.get("file_path")
                             if not target or target == name:
                                 response = {
                                     "type": "message",
@@ -416,36 +423,39 @@ def handle_client(conn, addr, name):
                                 conn.sendall(json.dumps(response).encode())
                                 continue
                             # 读取文件内容并 base64 编码
-                            # maximum file size 10MB
-                            try:
-                                with open(file_path, 'rb') as f:
-                                    file_bytes = f.read(10 * 1024 * 1024 + 1)
-                                if len(file_bytes) > 10 * 1024 * 1024:
-                                    raise Exception("File too large (max 10MB)")
-                                file_b64 = base64.b64encode(file_bytes).decode()
-                            except Exception as e:
-                                response = {
-                                    "type": "message",
-                                    "from": "server",
-                                    "to": name,
-                                    "to_type": "user",
-                                    "payload": f"File error: {e}",
-                                    "payload_type": "text",
-                                    "timestamp": datetime.now().isoformat()
-                                }
-                                conn.sendall(json.dumps(response).encode())
-                                continue
+                            # # maximum file size 10MB
+                            # try:
+                            #     with open(file_path, 'rb') as f:
+                            #         file_bytes = f.read(10 * 1024 * 1024 + 1)
+                            #     if len(file_bytes) > 10 * 1024 * 1024:
+                            #         raise Exception("File too large (max 10MB)")
+                            #     file_b64 = base64.b64encode(file_bytes).decode()
+                            # except Exception as e:
+                            #     response = {
+                            #         "type": "message",
+                            #         "from": "server",
+                            #         "to": name,
+                            #         "to_type": "user",
+                            #         "payload": f"File error: {e}",
+                            #         "payload_type": "text",
+                            #         "timestamp": datetime.now().isoformat()
+                            #     }
+                            #     conn.sendall(json.dumps(response).encode())
+                            #     continue
                             file_request = {
                                 "type": "message_file",
                                 "from": name,
                                 "to": target,
                                 "to_type": "user",
-                                "payload": file_b64,
+                                "payload": content, #加密 file 内容with nonce
                                 "payload_type": "file",
                                 "timestamp": datetime.now().isoformat(),
                                 "payload_id": str(hash(datetime.now())),
                                 "file_path": file_path # 相当于file name
                             }
+                            # 如果msg 有nonce，则将nonce 添加到out_msg
+                            if "nonce" in msg:
+                                file_request["nonce"] = msg["nonce"] # 将nonce 添加到file_request并发给target client
                             if target in clients:
                                 clients[target].sendall(json.dumps(file_request).encode())
                                 continue
@@ -454,6 +464,7 @@ def handle_client(conn, addr, name):
                                 forward_message_to_peer(peer_info["server_ip"], peer_info["server_port"], file_request)
                                 continue
                             else:
+                                # 如果target client 不在线，则发送系统消息给name client
                                 response = {
                                     "type": "message",
                                     "from": "server",
@@ -661,6 +672,9 @@ def handle_client(conn, addr, name):
                                 "content_type": "text",
                                 "timestamp": datetime.now().isoformat()
                             }
+                            # 如果msg 有nonce，则将nonce 添加到out_msg
+                            if "nonce" in msg:
+                                group_msg["nonce"] = msg["nonce"]
                             
                             # 向group内所有成员（除发送者外）转发消息
                             for member in groups[group_name]["members"]:
