@@ -9,7 +9,9 @@ import os
 import sqlite3
 
 #clientA 连接serverA
+#68.168.213.252 #remote server
 HOST = "127.0.0.1"
+# HOST = "68.168.213.252" # remote server
 PORT = 65432
 
 '''
