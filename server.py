@@ -205,6 +205,7 @@ name 是client 的name
 '''
 def handle_client(conn, addr, name):
     print(f"{name} connected from {addr}")
+    write_log(f"[User][{name}] connected from {addr}")
     # 给新client分配 client_ip
     client_ip = allocate_client_ip()
     if not client_ip:
@@ -218,6 +219,7 @@ def handle_client(conn, addr, name):
             "timestamp": datetime.now().isoformat()
         }
         #发送系统消息，给client 发送拒绝连接的消息
+        write_log(f"[User][{name}] No available client IPs. Connection refused.")
         conn.sendall(json.dumps(response).encode())
         conn.close()
         return
@@ -237,6 +239,7 @@ def handle_client(conn, addr, name):
     except:
         pass
     print(f"[Server] Assigned {name} client_ip: {client_ip}")
+    write_log(f"[Server] Assigned [{name}] client_ip: {client_ip}")
 
     #============= 等待client 发送消息 =============
     while True:
@@ -254,6 +257,8 @@ def handle_client(conn, addr, name):
                     # ==== Group Management Commands ====
                     # 列出所有group 格式：/list_group
                     if payload.startswith('/list_group'):
+                        write_log(f"[User][{name}] /list_group")
+                        
                         group_list = get_group_list()
                         response = {
                             "type": "message",
@@ -268,6 +273,8 @@ def handle_client(conn, addr, name):
                         continue
                     #显示当前所有online 用户
                     elif payload.startswith('/list'):
+                        write_log(f"[User][{name}] /list")
+                        
                         # 本地在线用户（除自己外）
                         online_users = [u for u in clients.keys() if u != name]
                         # 请求 serverB 的在线用户
@@ -292,6 +299,8 @@ def handle_client(conn, addr, name):
                         if match:
                             target = match.group(1)
                             content = match.group(2)
+                            write_log(f"[User][{name}] /msg {target} {content}")
+                            
                             if not target or target == name:
                                 response = {
                                     "type": "message",
@@ -351,6 +360,8 @@ def handle_client(conn, addr, name):
                         if match:
                             target = match.group(1)
                             file_path = match.group(2)
+                            write_log(f"[User][{name}] /msg_file {target} {file_path}")
+                            
                             if not target or target == name:
                                 response = {
                                     "type": "message",
@@ -419,6 +430,8 @@ def handle_client(conn, addr, name):
                         match = re.match(r'/create_group\s+(\S+)', payload)
                         if match:
                             group_name = match.group(1)
+                            write_log(f"[User][{name}] /create_group {group_name}")    
+                            
                             success, message = create_group(group_name, name)
                             response = {
                                 "type": "message",
@@ -447,6 +460,8 @@ def handle_client(conn, addr, name):
                         match = re.match(r'/join_group\s+(\S+)', payload)
                         if match:
                             group_name = match.group(1)
+                            write_log(f"[User][{name}] /join_group {group_name}")
+                            
                             success, message = join_group(group_name, name)
                             response = {
                                 "type": "message",
@@ -476,6 +491,8 @@ def handle_client(conn, addr, name):
                         match = re.match(r'/delete_group\s+(\S+)', payload)
                         if match:
                             group_name = match.group(1)
+                            write_log(f"[User][{name}] /delete_group {group_name}")
+                            
                             success, message = delete_group(group_name, name)
                             response = {
                                 "type": "message",
@@ -522,6 +539,7 @@ def handle_client(conn, addr, name):
                         if match:
                             group_name = match.group(1)
                             content = match.group(2)
+                            write_log(f"[User][{name}] /msg_group {group_name} {content}")
                             
                             if not is_user_in_group(name, group_name):
                                 response = {
@@ -617,6 +635,7 @@ def handle_client(conn, addr, name):
             break
 
     print(f"{name} disconnected")
+    write_log(f"[User][{name}] disconnected.")
     conn.close()
     if name in clients:
         clients[name]['online'] = False
@@ -627,10 +646,10 @@ def handle_client(conn, addr, name):
     # 清理group信息
     remove_user_from_all_groups(name)
     
-    print(f"[Server] Current client_ip_table: {client_ip_table}")
-    print(f"[Server] Current clients: {clients}")
-    print(f"[Server] Current groups: {groups}")
-    print(f"[Server] Current user_groups: {user_groups}")
+    #print(f"[Server] Current client_ip_table: {client_ip_table}")
+    #print(f"[Server] Current clients: {clients}")
+    #print(f"[Server] Current groups: {groups}")
+    #print(f"[Server] Current user_groups: {user_groups}")
 
 '''
 处理其他server 发来的消息
@@ -712,12 +731,28 @@ def name_check(name):
 
 
 
+def write_log(message, log_file='log.txt'):
+    """
+    将一条日志信息追加写入到文件中，如果文件不存在则自动创建。
+
+    :param message: 要记录的日志内容（字符串）
+    :param log_file: 日志文件路径（默认是 log.txt）
+    """
+    message = f"[{datetime.now().isoformat()}] {message}"
+    
+    with open(log_file, 'a', encoding='utf-8') as f:
+        f.write(message + '\n')
+
+
+
+
 
 # 主线程监听
 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
     s.bind((HOST, PORT))
     s.listen()
     print(f"[Server] Listening on {HOST}:{PORT}...")
+    write_log(f"[Server] Listening on {HOST}:{PORT}...")
 
     while True:
         conn, addr = s.accept()
