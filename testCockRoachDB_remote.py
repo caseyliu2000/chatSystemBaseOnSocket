@@ -40,7 +40,7 @@ import psycopg2
 # /defaultdb?sslmode=verify-full"
 #postgresql://<user>@<host>:<port>/<dbname>?sslmode=verify-full&sslrootcert=<path>&sslcert=<path>&sslkey=<path>
 
-''' 基本配置
+''' 基本配置 remoteDB. 
 conn=psycopg2.connect(
     dbname="group5",
     user="group9",
