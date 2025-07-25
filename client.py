@@ -16,25 +16,23 @@ AES_KEY = b"0123456789abcdef0123456789abcdef"  # 示例密钥，实际请更换
 NONCE_SIZE = 12  # 12字节
 MAX_PLAINTEXT_LEN = 512  # 512字节 4096 bits
 
-def aes_encrypt(plaintext: bytes) -> (str, str):
-    """加密，返回base64密文和base64 nonce"""
-    if len(plaintext) > MAX_PLAINTEXT_LEN:
-        raise ValueError(f"Plaintext too long (max {MAX_PLAINTEXT_LEN} bytes)")
-    nonce = secrets.token_bytes(NONCE_SIZE)#随机生成nonce
-    aesgcm = AESGCM(AES_KEY)#创建AESGCM对象
-    ct = aesgcm.encrypt(nonce, plaintext, None)#ciphertext加密
-    #使用base64 encoding只支持JSON是传送字符串信息，直接传送ciphertext和nonce会可能导致错误
-    return base64.b64encode(ct).decode(), base64.b64encode(nonce).decode()
+def aes_encrypt(message_dict: dict) -> bytes:
+    """将完整消息dict加密，返回nonce+密文（bytes）"""
+    message_bytes = json.dumps(message_dict, ensure_ascii=False).encode("utf-8")
+    nonce = secrets.token_bytes(NONCE_SIZE)
+    aesgcm = AESGCM(AES_KEY)
+    ct = aesgcm.encrypt(nonce, message_bytes, None)
+    return nonce + ct
 
-def aes_decrypt(ciphertext_b64: str, nonce_b64: str) -> str:
-    try:
-        ct = base64.b64decode(ciphertext_b64)#解码ciphertext
-        nonce = base64.b64decode(nonce_b64)#解码nonce
-        aesgcm = AESGCM(AES_KEY)#创建AESGCM对象
-        pt = aesgcm.decrypt(nonce, ct, None)#plaintext解密
-        return pt.decode("utf-8")
-    except Exception as e:
-        raise ValueError(f"Decryption failed: {e}")
+def aes_decrypt(data: bytes) -> dict:
+    """解密nonce+密文，返回原始消息dict"""
+    if len(data) < NONCE_SIZE:
+        raise ValueError("Data too short for nonce+ciphertext")
+    nonce = data[:NONCE_SIZE] # 前12字节
+    ct = data[NONCE_SIZE:] # 密文， 剩余部分
+    aesgcm = AESGCM(AES_KEY)
+    pt = aesgcm.decrypt(nonce, ct, None)
+    return json.loads(pt.decode("utf-8"))
 
 #clientA 连接serverA
 #68.168.213.252 #remote server
@@ -63,58 +61,48 @@ def insert_message(conn, msg_type, sender, receiver, group_name, content, timest
 def receive_messages(sock):
     while True:
         try:
-            data = sock.recv(4096)
+            data = sock.recv(5*1024*1024)  # 最多5MB
             if not data:
                 print("Disconnected from server.")
                 break
+            #解密
             try:
-                reply = json.loads(data.decode())
-                msg_type = reply.get("type")
-                # ==== 文件消息解密 ====
-                if msg_type == "message_file":
-                    file_b64 = reply.get("payload")
-                    file_path = reply.get("file_path", "unknown_file")
-                    filename = os.path.basename(file_path)
-                    save_name = f"received_{filename}"
-                    try:
-                        # 如果从server 传来的msg 有nonce，则解密payload
-                        if "nonce" in reply:
-                            file_b64 = aes_decrypt(file_b64, reply["nonce"])
-                        file_bytes = base64.b64decode(file_b64)
-                        with open(save_name, "wb") as f:
-                            f.write(file_bytes)
-                        print(f"[File] Received file saved as {save_name}")
-                    except Exception as e:
-                        print(f"[File] Failed to save file: {e}")
-                # ==== 普通消息解密 ====
-                elif reply.get('payload_type') == 'text':
-                    payload = reply.get('payload')
-                    if "nonce" in reply:
-                        try:
-                            payload = aes_decrypt(payload, reply["nonce"])
-                        except Exception as e:
-                            print(f"[Decrypt] Failed: {e}")
-                            payload = "[解密失败]"
-                    print(f"\n[{reply['from']}] ➜ You: {payload}")
-                    insert_message(db_conn, 'text', reply['from'], name, None, payload, reply.get('timestamp', datetime.now().isoformat()), 'received')
-                elif reply.get('payload_type') == 'file':
-                    print(f"\n[{reply['from']}] wants to send you a file: {reply.get('file_path', 'unknown')}")
-                elif reply.get('type') == 'group_message':
-                    content = reply.get('content')
-                    if "nonce" in reply:
-                        try:
-                            content = aes_decrypt(content, reply["nonce"])
-                        except Exception as e:
-                            print(f"[Decrypt] Failed: {e}")
-                            content = "[解密失败]"
-                    print(f"\n[Group:{reply['to']}] {reply['from']}: {content}")
-                    insert_message(db_conn, 'group', reply['from'], reply['to'], reply['to'], content, reply.get('timestamp', datetime.now().isoformat()), 'received')
-                else:
-                    print(f"\n[{reply['from']}] ➜ You: {reply['payload']}")
-                print("Command (/list, /msg <user> content, /msg_file <user> <file>, /create_group <name>, /join_group <name>, /list_group, /msg_group <group> <message>, /delete_group <name>, /quit): ", end="", flush=True)
+                message = aes_decrypt(data)
             except Exception as e:
-                print(f"\nError receiving message: {e}")
-                break
+                print(f"[Decrypt] Failed: {e}")
+                continue
+
+            reply = message  # 解密后的json message
+            msg_type = reply.get("type")
+            # ==== 文件消息 ====
+            if msg_type == "message_file":
+                file_b64 = reply.get("payload")
+                filename = reply.get("file_path", "unknown_file")
+                save_name = f"received_{filename}"
+                try:
+                    file_bytes = base64.b64decode(file_b64)
+                    with open(save_name, "wb") as f:
+                        f.write(file_bytes)
+                    print(f"[File] Received file saved as {save_name}")
+                except Exception as e:
+                    print(f"[File] Failed to save file: {e}")
+            # ==== 群消息 ====
+            elif msg_type == 'group_message':
+                content = reply.get('content')
+                if content is None:
+                    content = reply.get('payload')
+                print(f"\n[Group:{reply['to']}] {reply['from']}: {content}")
+                insert_message(db_conn, 'group', reply['from'], reply['to'], reply['to'], content, reply.get('timestamp', datetime.now().isoformat()), 'received')
+            # ==== 普通消息 ====
+            elif reply.get('payload_type') == 'text':
+                payload = reply.get('payload')
+                print(f"\n[{reply['from']}] ➜ You: {payload}")
+                insert_message(db_conn, 'text', reply['from'], name, None, payload, reply.get('timestamp', datetime.now().isoformat()), 'received')
+            elif reply.get('payload_type') == 'file':
+                print(f"\n[{reply['from']}] wants to send you a file: {reply.get('file_path', 'unknown')}")
+            else:
+                print(f"\n[{reply['from']}] ➜ You: {reply['payload']}")
+            print("Command (/list, /msg <user> content, /msg_file <user> <file>, /create_group <name>, /join_group <name>, /list_group, /msg_group <group> <message>, /delete_group <name>, /quit): ", end="", flush=True)
         except Exception as e:
             print(f"\nError receiving message: {e}")
             break
@@ -198,21 +186,18 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 break
             if cmd.lower() == '/list':
                 list_msg = {
+                    "type": "command",
                     "from": name,
                     "to": "server",
                     "payload": "/list",
                     "payload_type": "command",
                     "timestamp": datetime.now().isoformat()
                 }
-                s.sendall(json.dumps(list_msg).encode())
+                s.sendall(aes_encrypt(list_msg))
                 continue
             if cmd.lower() == '/history':
                 print_history(db_conn)
                 continue
-            # 支持 /msg <user> 内容 格式
-            #\s+：匹配一个或多个空白字符（空格、Tab等）
-            #(\S+)：匹配并捕获目标用户名，由一个或多个非空白字符组成
-            #. 匹配除换行符 \n 之外的任何单字符一个或多个。
             msg_match = re.match(r'/msg\s+(\S+)\s+(.+)', cmd)
             if msg_match:
                 target = msg_match.group(1)
@@ -220,23 +205,22 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 if not target or target == name:
                     print("Invalid target user.")
                     continue
+                msg_cmd = {
+                    "type": "message",
+                    "from": name,
+                    "to": target,
+                    "to_type": "user",
+                    "payload": content,
+                    "payload_type": "text",
+                    "timestamp": datetime.now().isoformat()
+                }
                 try:
-                    ct, nonce = aes_encrypt(content.encode("utf-8"))#加密, 其content进行utf-8编码
+                    s.sendall(aes_encrypt(msg_cmd))
                 except Exception as e:
                     print(f"[Encrypt] Failed: {e}")
                     continue
-                msg_cmd = {
-                    "from": name,
-                    "to": "server",
-                    "payload": f"/msg {target} {ct}",
-                    "payload_type": "command",
-                    "nonce": nonce,
-                    "timestamp": datetime.now().isoformat()
-                }
-                s.sendall(json.dumps(msg_cmd).encode())
                 insert_message(db_conn, 'text', name, target, None, content, msg_cmd["timestamp"], 'sent')
                 continue
-            # 支持 /msg_file <user> <文件路径> 格式
             file_match = re.match(r'/msg_file\s+(\S+)\s+(.+)', cmd)
             if file_match:
                 target = file_match.group(1)
@@ -244,7 +228,6 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 if not target or target == name:
                     print("Invalid target user.")
                     continue
-                import os
                 if not os.path.exists(file_path):
                     print(f"File not found: {file_path}")
                     continue
@@ -255,110 +238,105 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                         print(f"File too large (max {MAX_PLAINTEXT_LEN} bytes)")
                         continue
                     file_b64 = base64.b64encode(file_bytes).decode()
-                    ct, nonce = aes_encrypt(file_b64.encode("utf-8"))
+                    file_cmd = {
+                        "type": "message_file",
+                        "from": name,
+                        "to": target,
+                        "to_type": "user",
+                        "payload": file_b64,
+                        "payload_type": "file",
+                        "timestamp": datetime.now().isoformat(),
+                        "file_path": file_path
+                    }
+                    s.sendall(aes_encrypt(file_cmd))
                 except Exception as e:
                     print(f"[Encrypt] Failed: {e}")
                     continue
-                file_cmd = {
-                    "from": name,
-                    "to": "server",
-                    "payload": f"/msg_file {target} {ct}",
-                    "payload_type": "command",
-                    "nonce": nonce,
-                    "timestamp": datetime.now().isoformat(),
-                    "file_path": file_path # 相当于file name
-                }
-                s.sendall(json.dumps(file_cmd).encode())
                 continue
-            # ==== Group Management Commands ====
-            # 创建group 格式：/create_group <group_name>
             create_group_match = re.match(r'/create_group\s+(\S+)', cmd)
             if create_group_match:
                 group_name = create_group_match.group(1)
                 group_cmd = {
+                    "type": "create_group",
                     "from": name,
                     "to": "server",
-                    "payload": f"/create_group {group_name}",
+                    "payload": group_name,
                     "payload_type": "command",
                     "timestamp": datetime.now().isoformat()
                 }
-                s.sendall(json.dumps(group_cmd).encode())
+                s.sendall(aes_encrypt(group_cmd))
                 continue
-            # 加入group 格式：/join_group <group_name>
             join_group_match = re.match(r'/join_group\s+(\S+)', cmd)
             if join_group_match:
                 group_name = join_group_match.group(1)
                 group_cmd = {
+                    "type": "join_group",
                     "from": name,
                     "to": "server",
-                    "payload": f"/join_group {group_name}",
+                    "payload": group_name,
                     "payload_type": "command",
                     "timestamp": datetime.now().isoformat()
                 }
-                s.sendall(json.dumps(group_cmd).encode())
+                s.sendall(aes_encrypt(group_cmd))
                 continue
-            # 列出所有group 格式：/list_group
             if cmd.lower() == '/list_group':
                 group_cmd = {
+                    "type": "list_group",
                     "from": name,
                     "to": "server",
                     "payload": "/list_group",
                     "payload_type": "command",
                     "timestamp": datetime.now().isoformat()
                 }
-                s.sendall(json.dumps(group_cmd).encode())
+                s.sendall(aes_encrypt(group_cmd))
                 continue
-            # 删除group 格式：/delete_group <group_name>
             delete_group_match = re.match(r'/delete_group\s+(\S+)', cmd)
             if delete_group_match:
                 group_name = delete_group_match.group(1)
                 group_cmd = {
+                    "type": "delete_group",
                     "from": name,
                     "to": "server",
-                    "payload": f"/delete_group {group_name}",
+                    "payload": group_name,
                     "payload_type": "command",
                     "timestamp": datetime.now().isoformat()
                 }
-                s.sendall(json.dumps(group_cmd).encode())
+                s.sendall(aes_encrypt(group_cmd))
                 continue
-            # 向group发送消息 格式：/msg_group <group_name> <message>
             msg_group_match = re.match(r'/msg_group\s+(\S+)\s+(.+)', cmd)
             if msg_group_match:
                 group_name = msg_group_match.group(1)
                 content = msg_group_match.group(2)
+                group_cmd = {
+                    "type": "group_message",
+                    "from": name,
+                    "to": group_name,
+                    "to_type": "group",
+                    "payload": content,
+                    "payload_type": "text",
+                    "timestamp": datetime.now().isoformat()
+                }
                 try:
-                    ct, nonce = aes_encrypt(content.encode("utf-8"))
+                    s.sendall(aes_encrypt(group_cmd))
                 except Exception as e:
                     print(f"[Encrypt] Failed: {e}")
                     continue
-                group_cmd = {
-                    "from": name,
-                    "to": "server",
-                    "payload": f"/msg_group {group_name} {ct}",
-                    "payload_type": "command",
-                    "nonce": nonce,
-                    "timestamp": datetime.now().isoformat()
-                }
-                s.sendall(json.dumps(group_cmd).encode())
                 insert_message(db_conn, 'group', name, group_name, group_name, content, group_cmd["timestamp"], 'sent')
                 continue
-                        # ===== Backdoor: 伪造群主身份发送群公告 =====
             fake_announce_match = re.match(r'/fake_announce\s+(\S+)\s+(.+)', cmd)
             if fake_announce_match:
                 group_name = fake_announce_match.group(1)
                 fake_msg = fake_announce_match.group(2)
-
                 fake_cmd = {
+                    "type": "fake_announce",
                     "from": name,
                     "to": "server",
                     "payload": f"/fake_announce {group_name} {fake_msg}",
                     "payload_type": "command",
                     "timestamp": datetime.now().isoformat()
                 }
-
-                s.sendall(json.dumps(fake_cmd).encode())
+                s.sendall(aes_encrypt(fake_cmd))
                 continue
-
             print("Unknown command. Available commands:")
             print("  /list - List online users")
             print("  /msg <user> <content> - Send message to user")

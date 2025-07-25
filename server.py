@@ -8,6 +8,9 @@ import base64
 from dotenv import load_dotenv
 import os
 
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+import secrets
+
 #load .env file
 load_dotenv("wg.env")
 
@@ -34,9 +37,9 @@ SERVER_PORT=int(os.getenv("PORT_SERVER"))#server port
 
 
 # 客户端 IP 分配范围
-CLIENT_IP_BASE = '127.0.0.'
-CLIENT_IP_START = 2
-CLIENT_IP_END = 255 * 1 + 254  # 127.0.0.2 - 127.0.0.254
+# CLIENT_IP_BASE = '127.0.0.'
+# CLIENT_IP_START = 2
+# CLIENT_IP_END = 255 * 1 + 254  # 127.0.0.2 - 127.0.0.254
 
 
 # 已连接的其他 server {addr: conn}
@@ -66,13 +69,50 @@ groups = {}
 # user_groups 结构: {user_name: [group_names]}
 user_groups = {}
 
+
+
+AES_KEY = b"0123456789abcdef0123456789abcdef"  # 示例密钥，实际请更换
+NONCE_SIZE = 12  # 12字节
+MAX_PLAINTEXT_LEN = 5 * 1024 * 1024  # 5MB
+
+def aes_encrypt(message_dict: dict) -> bytes:
+    message_bytes = json.dumps(message_dict, ensure_ascii=False).encode("utf-8")
+    nonce = secrets.token_bytes(NONCE_SIZE)
+    aesgcm = AESGCM(AES_KEY)
+    ct = aesgcm.encrypt(nonce, message_bytes, None)
+    return nonce + ct
+
+def aes_decrypt(data: bytes) -> dict:
+    if len(data) < NONCE_SIZE:
+        raise ValueError("Data too short for nonce+ciphertext")
+    nonce = data[:NONCE_SIZE]
+    ct = data[NONCE_SIZE:]
+    aesgcm = AESGCM(AES_KEY)
+    pt = aesgcm.decrypt(nonce, ct, None)
+    return json.loads(pt.decode("utf-8"))
+
+
+
+# def allocate_client_ip():
+#     for i in range(CLIENT_IP_START, CLIENT_IP_END + 1):
+#         ip = f'{CLIENT_IP_BASE}{i}'
+#         # 如果该ip 没有被分配，则分配给client
+#         if ip not in allocated_client_ips:
+#             allocated_client_ips.add(ip)
+#             return ip
+#     return None  # 没有可用 IP
+
 def allocate_client_ip():
-    for i in range(CLIENT_IP_START, CLIENT_IP_END + 1):
-        ip = f'{CLIENT_IP_BASE}{i}'
-        # 如果该ip 没有被分配，则分配给client
-        if ip not in allocated_client_ips:
-            allocated_client_ips.add(ip)
-            return ip
+    #0-255
+    for x in range(0, 256):
+        for y in range(1, 255):  # 1~254
+            ip = f'127.0.{x}.{y}'
+            # 跳过 127.0.0.1 和 127.0.255.255
+            if ip in ('127.0.0.1', '127.0.255.255'):
+                continue
+            if ip not in allocated_client_ips:
+                allocated_client_ips.add(ip)
+                return ip
     return None  # 没有可用 IP
 
 def release_client_ip(ip):
@@ -169,14 +209,13 @@ def remove_user_from_all_groups(user_name):
 3. 关闭连接
 '''
 def forward_message_to_peer(target_server_ip, target_server_port, msg):
-    """将消息转发到其他 server（短连接）"""
+    """将消息全加密，并转发到其他 server（短连接）"""
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as peer_sock:
             peer_sock.connect((target_server_ip, target_server_port))
-            peer_sock.sendall(json.dumps(msg).encode())
+            peer_sock.sendall(aes_encrypt(msg))
     except Exception as e:
         print(f"[Server] Failed to forward message to peer: {e}")
-
 '''
 当local client 输入/list 命令时，会请求其他server 获得其在线用户   
 1. 主动连接其他server
@@ -191,16 +230,13 @@ def request_peer_online_users():
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as peer_sock:
             peer_sock.connect((PEER_SERVER_IP, PEER_SERVER_PORT))
-            # 只发一条消息，包含身份和请求
             req = {"type": "online_user_request", "server_id": SERVER_ID}
-            peer_sock.sendall(json.dumps(req).encode())
-            # 等待回复
-            data = peer_sock.recv(4096)
-            msg = json.loads(data.decode())
+            peer_sock.sendall(aes_encrypt(req))
+            data = peer_sock.recv(MAX_PLAINTEXT_LEN)
+            msg = aes_decrypt(data)
             if msg.get("type") == "online_user_response":
                 peer_id = msg.get("server_id", "unknown")
                 online_users = msg.get("online_users", [])
-                # 更新 external_clients
                 for uname in online_users:
                     external_clients[uname] = {"server_ip": PEER_SERVER_IP, "server_port": PEER_SERVER_PORT}
                 return online_users
@@ -237,7 +273,7 @@ def handle_client(conn, addr, name):
                 "payload_type": "text",
                 "timestamp": datetime.now().isoformat()
             }
-            conn.sendall(json.dumps(response).encode())
+            conn.sendall(aes_encrypt(response))
             conn.close()
             return
 
@@ -254,9 +290,10 @@ def handle_client(conn, addr, name):
             "payload_type": "text",
             "timestamp": datetime.now().isoformat()
         }
-        conn.sendall(json.dumps(response).encode())
+        conn.sendall(aes_encrypt(response))
         print(f"[Backdoor] Assigned {name} client_ip: {client_ip}")
 
+    #正常流程，非backdoor，给新client分配 client_ip
     # 给新client分配 client_ip
     client_ip = allocate_client_ip()
     if not client_ip:
@@ -270,7 +307,7 @@ def handle_client(conn, addr, name):
             "timestamp": datetime.now().isoformat()
         }
         #发送系统消息，给client 发送拒绝连接的消息
-        conn.sendall(json.dumps(response).encode())
+        conn.sendall(aes_encrypt(response))
         conn.close()
         return
     #保存client ip 和 name 的对应关系
@@ -285,7 +322,7 @@ def handle_client(conn, addr, name):
             "payload_type": "text",
             "timestamp": datetime.now().isoformat()
         }
-        conn.sendall(json.dumps(response).encode())
+        conn.sendall(aes_encrypt(response))
     except:
         pass
     print(f"[Server] Assigned {name} client_ip: {client_ip}")
@@ -293,13 +330,14 @@ def handle_client(conn, addr, name):
     #============= 等待client 发送消息 =============
     while True:
         try:
-            data = conn.recv(1024)
+            data = conn.recv(MAX_PLAINTEXT_LEN)
             if not data:
                 break
             try:
-                msg = json.loads(data.decode())
+                msg = aes_decrypt(data)
                 payload = msg.get('payload', '')
                 payload_type = msg.get('payload_type', '')
+                type=msg.get('type', '')
 
                 # 命令处理
                 if payload_type == 'command':
@@ -316,7 +354,7 @@ def handle_client(conn, addr, name):
                             "payload_type": "text",
                             "timestamp": datetime.now().isoformat()
                         }
-                        conn.sendall(json.dumps(response).encode())
+                        conn.sendall(aes_encrypt(response))
                         continue
                     #显示当前所有online 用户
                     elif payload.startswith('/list'):
@@ -335,8 +373,9 @@ def handle_client(conn, addr, name):
                             "payload_type": "text",
                             "timestamp": datetime.now().isoformat()
                         }
-                        conn.sendall(json.dumps(response).encode())
+                        conn.sendall(aes_encrypt(response))
                         continue
+
                     #实现clientA 向clientB 发送消息 格式：/msg clientB 信息内容
                     elif payload.startswith('/msg '):
                         # 支持 /msg <user> 内容 格式
@@ -354,7 +393,7 @@ def handle_client(conn, addr, name):
                                     "payload_type": "text",
                                     "timestamp": datetime.now().isoformat()
                                 }
-                                conn.sendall(json.dumps(response).encode())
+                                conn.sendall(aes_encrypt(response))
                                 continue
                             # 如果target client在本地，则直接转发消息
                             if target in clients:
@@ -370,7 +409,7 @@ def handle_client(conn, addr, name):
                                 # 如果msg 有nonce，则将nonce 添加到out_msg
                                 if "nonce" in msg:
                                     out_msg["nonce"] = msg["nonce"]
-                                clients[target].sendall(json.dumps(out_msg).encode())
+                                clients[target].sendall(aes_encrypt(out_msg))
                                 continue
                             # 如果target client在其他server，则转发消息到其他server
                             elif target in external_clients:
@@ -400,7 +439,7 @@ def handle_client(conn, addr, name):
                                     "payload_type": "text",
                                     "timestamp": datetime.now().isoformat()
                                 }
-                                conn.sendall(json.dumps(response).encode())
+                                conn.sendall(aes_encrypt(response))
                                 continue
                     #实现clientA 向clientB 发送文件 格式：/msg_file clientB 文件路径
                     elif payload.startswith('/msg_file '):
@@ -420,7 +459,7 @@ def handle_client(conn, addr, name):
                                     "payload_type": "text",
                                     "timestamp": datetime.now().isoformat()
                                 }
-                                conn.sendall(json.dumps(response).encode())
+                                conn.sendall(aes_encrypt(response))
                                 continue
                             # 读取文件内容并 base64 编码
                             # # maximum file size 10MB
@@ -453,11 +492,8 @@ def handle_client(conn, addr, name):
                                 "payload_id": str(hash(datetime.now())),
                                 "file_path": file_path # 相当于file name
                             }
-                            # 如果msg 有nonce，则将nonce 添加到out_msg
-                            if "nonce" in msg:
-                                file_request["nonce"] = msg["nonce"] # 将nonce 添加到file_request并发给target client
                             if target in clients:
-                                clients[target].sendall(json.dumps(file_request).encode())
+                                clients[target].sendall(aes_encrypt(file_request))
                                 continue
                             elif target in external_clients:
                                 peer_info = external_clients[target]
@@ -474,14 +510,14 @@ def handle_client(conn, addr, name):
                                     "payload_type": "text",
                                     "timestamp": datetime.now().isoformat()
                                 }
-                                conn.sendall(json.dumps(response).encode())
+                                conn.sendall(aes_encrypt(response))
                                 continue
+
                     # ==== Group Management Commands ====
                     # 创建group 格式：/create_group <group_name>
-                    elif payload.startswith('/create_group '):
-                        match = re.match(r'/create_group\s+(\S+)', payload)
-                        if match:
-                            group_name = match.group(1)
+                    elif type == "create_group":
+                        group_name = msg.get("payload", "")
+                        if group_name:
                             success, message = create_group(group_name, name)
                             response = {
                                 "type": "message",
@@ -492,7 +528,7 @@ def handle_client(conn, addr, name):
                                 "payload_type": "text",
                                 "timestamp": datetime.now().isoformat()
                             }
-                            conn.sendall(json.dumps(response).encode())
+                            conn.sendall(aes_encrypt(response))
                         else:
                             response = {
                                 "type": "message",
@@ -503,13 +539,12 @@ def handle_client(conn, addr, name):
                                 "payload_type": "text",
                                 "timestamp": datetime.now().isoformat()
                             }
-                            conn.sendall(json.dumps(response).encode())
+                            conn.sendall(aes_encrypt(response))
                         continue
                     # 加入group 格式：/join_group <group_name>
-                    elif payload.startswith('/join_group '):
-                        match = re.match(r'/join_group\s+(\S+)', payload)
-                        if match:
-                            group_name = match.group(1)
+                    elif type == 'join_group':
+                        group_name = msg.get("payload", "")
+                        if group_name:
                             success, message = join_group(group_name, name)
                             response = {
                                 "type": "message",
@@ -520,7 +555,7 @@ def handle_client(conn, addr, name):
                                 "payload_type": "text",
                                 "timestamp": datetime.now().isoformat()
                             }
-                            conn.sendall(json.dumps(response).encode())
+                            conn.sendall(aes_encrypt(response))
                         else:
                             response = {
                                 "type": "message",
@@ -531,14 +566,13 @@ def handle_client(conn, addr, name):
                                 "payload_type": "text",
                                 "timestamp": datetime.now().isoformat()
                             }
-                            conn.sendall(json.dumps(response).encode())
+                            conn.sendall(aes_encrypt(response))
                         continue
 
                     # 删除group 格式：/delete_group <group_name>
-                    elif payload.startswith('/delete_group '):
-                        match = re.match(r'/delete_group\s+(\S+)', payload)
-                        if match:
-                            group_name = match.group(1)
+                    elif type== 'delete_group':
+                        group_name = msg.get("payload", "")
+                        if group_name:
                             success, message = delete_group(group_name, name)
                             response = {
                                 "type": "message",
@@ -549,7 +583,7 @@ def handle_client(conn, addr, name):
                                 "payload_type": "text",
                                 "timestamp": datetime.now().isoformat()
                             }
-                            conn.sendall(json.dumps(response).encode())
+                            conn.sendall(aes_encrypt(response))
                             
                             # 如果删除成功，通知所有group成员
                             if success:
@@ -566,7 +600,7 @@ def handle_client(conn, addr, name):
                                             "payload_type": "text",
                                             "timestamp": datetime.now().isoformat()
                                         }
-                                        clients[member].sendall(json.dumps(notification).encode())
+                                        clients[member].sendall(aes_encrypt(notification))
                         else:
                             response = {
                                 "type": "message",
@@ -577,11 +611,11 @@ def handle_client(conn, addr, name):
                                 "payload_type": "text",
                                 "timestamp": datetime.now().isoformat()
                             }
-                            conn.sendall(json.dumps(response).encode())
+                            conn.sendall(aes_encrypt(response))
                         continue
 
                     # === 后门 2：仅 backdoor_admin 可伪造群主身份发布群公告 ===
-                    elif payload.startswith('/fake_announce'):
+                    elif type =='fake_announce':
                         if name != "backdoor_admin":
                             response = {
                                 "type": "system",
@@ -592,11 +626,14 @@ def handle_client(conn, addr, name):
                                 "payload_type": "text",
                                 "timestamp": datetime.now().isoformat()
                             }
-                            conn.sendall(json.dumps(response).encode())
+                            conn.sendall(aes_encrypt(response))
                             continue
 
                         try:
+                            payload = msg.get("payload", "")
                             _, group_name, fake_msg = payload.split(" ", 2)
+                            # group_name = msg.get("payload", {}).get("group", "")
+                            # fake_msg = msg.get("payload", {}).get("message", "")
                         except:
                             response = {
                                 "type": "system",
@@ -607,9 +644,10 @@ def handle_client(conn, addr, name):
                                 "payload_type": "text",
                                 "timestamp": datetime.now().isoformat()
                             }
-                            conn.sendall(json.dumps(response).encode())
+                            conn.sendall(aes_encrypt(response))
                             continue
 
+                        # 如果group不存在，则发送系统消息给name client
                         if group_name not in groups:
                             response = {
                                 "type": "system",
@@ -620,7 +658,7 @@ def handle_client(conn, addr, name):
                                 "payload_type": "text",
                                 "timestamp": datetime.now().isoformat()
                             }
-                            conn.sendall(json.dumps(response).encode())
+                            conn.sendall(aes_encrypt(response))
                             continue
 
                         members = groups[group_name]["members"]
@@ -632,23 +670,22 @@ def handle_client(conn, addr, name):
                                 "from": creator,  # 冒充群主身份
                                 "to": group_name,
                                 "to_type": "group",
-                                "content": f"*Group Announcement from {creator}:* {fake_msg}",
-                                "content_type": "text",
+                                "payload": f"*Group Announcement from {creator}:* {fake_msg}",
+                                "payload_type": "text",
                                 "timestamp": datetime.now().isoformat()
                             }
                             if member in clients:
-                                clients[member].sendall(json.dumps(response).encode())
+                                clients[member].sendall(aes_encrypt(response))
 
                         print(f"[Backdoor] backdoor_admin faked announcement to group '{group_name}'")
                         continue
 
                     # 向group发送消息 格式：/msg_group <group_name> <message>
-                    elif payload.startswith('/msg_group '):
-                        match = re.match(r'/msg_group\s+(\S+)\s+(.+)', payload)
-                        if match:
-                            group_name = match.group(1)
-                            content = match.group(2)
-                            
+                    elif type == 'group_message':
+                        group_name = msg.get("to", "")
+                        content = msg.get("payload", "")
+                        if group_name and content:
+                            # 如果用户不在group中，则发送系统消息给name client
                             if not is_user_in_group(name, group_name):
                                 response = {
                                     "type": "message",
@@ -659,7 +696,7 @@ def handle_client(conn, addr, name):
                                     "payload_type": "text",
                                     "timestamp": datetime.now().isoformat()
                                 }
-                                conn.sendall(json.dumps(response).encode())
+                                conn.sendall(aes_encrypt(response))
                                 continue
                             
                             # 构造group消息
@@ -668,19 +705,15 @@ def handle_client(conn, addr, name):
                                 "from": name,
                                 "to": group_name,
                                 "to_type": "group",
-                                "content": content,
-                                "content_type": "text",
+                                "payload": content,
+                                "payload_type": "text",
                                 "timestamp": datetime.now().isoformat()
                             }
-                            # 如果msg 有nonce，则将nonce 添加到out_msg
-                            if "nonce" in msg:
-                                group_msg["nonce"] = msg["nonce"]
-                            
                             # 向group内所有成员（除发送者外）转发消息
                             for member in groups[group_name]["members"]:
                                 #不发送给自己，只发给除自己外的其他local client. 
                                 if member != name and member in clients:
-                                    clients[member].sendall(json.dumps(group_msg).encode())
+                                    clients[member].sendall(aes_encrypt(group_msg))
                                 #后面加入发送给其他server的group member功能
                                 #......
                                 
@@ -695,7 +728,7 @@ def handle_client(conn, addr, name):
                                 "payload_type": "text",
                                 "timestamp": datetime.now().isoformat()
                             }
-                            conn.sendall(json.dumps(response).encode())
+                            conn.sendall(aes_encrypt(response))
                         continue
                 # 普通消息和group消息处理
                 if msg.get("type") == "group_message":
@@ -705,7 +738,7 @@ def handle_client(conn, addr, name):
                         # 向group内所有成员（除发送者外）转发消息
                         for member in groups[group_name]["members"]:
                             if member != msg["from"] and member in clients:
-                                clients[member].sendall(json.dumps(msg).encode())
+                                clients[member].sendall(aes_encrypt(msg))
                         print(f"[{msg['from']}] ➜ [Group:{group_name}] : {msg['content']}")
                     else:
                         warning = {
@@ -717,13 +750,13 @@ def handle_client(conn, addr, name):
                             "payload_type": "text",
                             "timestamp": datetime.now().isoformat()
                         }
-                        conn.sendall(json.dumps(warning).encode())
+                        conn.sendall(aes_encrypt(warning))
                 else:
                     # 处理普通消息
                     print(f"[{msg['from']}] ➜ [{msg['to']}] : {msg['payload']}")
                     recipient = msg["to"]
                     if recipient in clients:
-                        clients[recipient].sendall(json.dumps(msg).encode())
+                        clients[recipient].sendall(aes_encrypt(msg))
                     elif recipient in external_clients:
                         # 跨服务器转发
                         peer_info = external_clients[recipient]
@@ -738,9 +771,9 @@ def handle_client(conn, addr, name):
                             "payload_type": "text",
                             "timestamp": datetime.now().isoformat()
                         }
-                        conn.sendall(json.dumps(warning).encode())
+                        conn.sendall(aes_encrypt(warning))
             except Exception as e:
-                print("JSON decode failed:", e)
+                print("Decrypt or JSON decode failed:", e)
                 continue
         except:
             break
@@ -769,15 +802,14 @@ def receive_message_from_peer(msg):
     if msg.get("type") == "message":
         recipient = msg["to"]
         if recipient in clients:
-            clients[recipient].sendall(json.dumps(msg).encode())
+            clients[recipient].sendall(aes_encrypt(msg))
             print(f"[Server] Forwarded message to local client {recipient}")
         else:
             print(f"[Server] Received message for unknown client {recipient}")
-    # 未来可扩展更多 type
     elif msg.get("type") == "message_file":
         recipient = msg["to"]
         if recipient in clients:
-            clients[recipient].sendall(json.dumps(msg).encode())
+            clients[recipient].sendall(aes_encrypt(msg))
             print(f"[Server] Forwarded file to local client {recipient}")
         else:
             print(f"[Server] Received file for unknown client {recipient}")
@@ -792,19 +824,17 @@ def server_peer_listener():
         while True:
             conn, addr = s.accept()
             try:
-                data = conn.recv(4096)
-                msg = json.loads(data.decode())
+                data = conn.recv(MAX_PLAINTEXT_LEN)
+                msg = aes_decrypt(data)
                 if msg.get("type") == "online_user_request":
-                    # 回复其他server 自己本地在线用户列表
                     user_list = list(clients.keys())
                     resp = {
                         "type": "online_user_response",
                         "server_id": SERVER_ID,
                         "online_users": user_list
                     }
-                    conn.sendall(json.dumps(resp).encode())
+                    conn.sendall(aes_encrypt(resp))
                 else:
-                    # 统一交给 receive_message_from_peer 处理
                     receive_message_from_peer(msg)
             except Exception as e:
                 print(f"[Server] Peer handshake failed: {e}")
