@@ -14,7 +14,7 @@ import secrets
 # 256bit密钥（32字节），实际部署时请安全存储
 AES_KEY = b"0123456789abcdef0123456789abcdef"  # 示例密钥，实际请更换
 NONCE_SIZE = 12  # 12字节
-MAX_PLAINTEXT_LEN = 512  # 512字节
+MAX_PLAINTEXT_LEN = 512  # 512字节 4096 bits
 
 def aes_encrypt(plaintext: bytes) -> (str, str):
     """加密，返回base64密文和base64 nonce"""
