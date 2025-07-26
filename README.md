@@ -4,6 +4,7 @@
  - 根目录中，加入wg.env文件，设置好了server.py的ip,port参数，用于部署wireguard的配置。
  - 对Message, message file, group message的payload，进行AES-256-GCM加密
  - 增加对服务器端速率限制（防洪泛攻击）功能，防止客户端恶意刷屏
+ - 配置基本cockroachdb信息，但去除了cert，key，以及password。此分支用作保存代码内容
 
 # Chat System with Group Messaging
 
