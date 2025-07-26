@@ -11,10 +11,16 @@ import sqlite3
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 import secrets
 
+from schemas import parse_and_validate_message
+import pyclamd
+import magic
+
 # 256bit密钥（32字节），实际部署时请安全存储
 AES_KEY = b"0123456789abcdef0123456789abcdef"  # 示例密钥，实际请更换
 NONCE_SIZE = 12  # 12字节
-MAX_PLAINTEXT_LEN = 512  # 512字节 4096 bits
+
+MAX_PLAINTEXT_LEN = 512  # 512字节
+cd = pyclamd.ClamdUnixSocket()
 
 def aes_encrypt(message_dict: dict) -> bytes:
     """将完整消息dict加密，返回nonce+密文（bytes）"""
@@ -57,7 +63,6 @@ def insert_message(conn, msg_type, sender, receiver, group_name, content, timest
         (msg_type, sender, receiver, group_name, content, timestamp, direction)
     )
     conn.commit()
-
 def receive_messages(sock):
     while True:
         try:
@@ -68,6 +73,90 @@ def receive_messages(sock):
             #解密
             try:
                 message = aes_decrypt(data)
+                msg_type = message.get("type")
+                # ==== 文件消息解密 ====
+                if msg_type == "message_file":
+                    file_b64 = reply.get("payload")
+                    file_path = reply.get("file_path", "unknown_file")
+                    filename = os.path.basename(file_path)
+                    save_name = f"received_{filename}"
+                    try:
+                        # 如果从server 传来的msg 有nonce，则解密payload
+                        if "nonce" in reply:
+                            file_b64 = aes_decrypt(file_b64, reply["nonce"])
+                        file_bytes = base64.b64decode(file_b64)
+                        with open(save_name, "wb") as f:
+                            f.write(file_bytes)
+                        ALLOWED_MIME_CATEGORIES = [
+                            "ASCII text",
+                            "UTF-8 Unicode text",
+                            "ISO-8859 text",
+                            "UTF-16",
+                            "PDF document",
+                            "Microsoft Word",
+                            'OpenDocument Text',
+                            "Microsoft PowerPoint",
+                            'OpenDocument Presentation',
+                            "Microsoft Excel",
+                            "OpenDocument Spreadsheet",
+                            'ISO Media, MPEG v4 system',
+                            "RIFF (little-endian) data, AVI",
+                            "Microsoft ASF",
+                            "Matroska data",
+                            "QuickTime Movie",
+                            "JPEG image data",
+                            "PNG image data",
+                            "GIF image data",
+                            "PC bitmap",
+                            "SVG image",
+                            "MPEG ADTS, layer III",
+                            "RIFF (little-endian) data, WAVE audio"
+                        ]
+                        file_type=magic.from_buffer(file_bytes)
+                        print(file_type)
+                        type_allowed=False
+                        for i in ALLOWED_MIME_CATEGORIES:
+                            if file_type.startswith(i)==True:
+                                type_allowed=True
+                        if type_allowed==False:
+                            print("File type not allowed:", file_type)
+                            raise Exception
+                        # Scan the byte stream
+                        result = cd.scan_stream(file_bytes)
+                        if result is None:
+                            print("File is clean.")
+                        else:
+                            print("Virus found:", result)
+                            raise Exception
+                        print(f"[File] Received file saved as {save_name}")
+                    except Exception as e:
+                        print(f"[File] Failed to save file: {e}")
+                # ==== 普通消息解密 ====
+                elif reply.get('payload_type') == 'text':
+                    payload = reply.get('payload')
+                    if "nonce" in reply:
+                        try:
+                            payload = aes_decrypt(payload, reply["nonce"])
+                        except Exception as e:
+                            print(f"[Decrypt] Failed: {e}")
+                            payload = "[解密失败]"
+                    print(f"\n[{reply['from']}] ➜ You: {payload}")
+                    insert_message(db_conn, 'text', reply['from'], name, None, payload, reply.get('timestamp', datetime.now().isoformat()), 'received')
+                elif reply.get('payload_type') == 'file':
+                    print(f"\n[{reply['from']}] wants to send you a file: {reply.get('file_path', 'unknown')}")
+                elif reply.get('type') == 'group_message':
+                    content = reply.get('content')
+                    if "nonce" in reply:
+                        try:
+                            content = aes_decrypt(content, reply["nonce"])
+                        except Exception as e:
+                            print(f"[Decrypt] Failed: {e}")
+                            content = "[解密失败]"
+                    print(f"\n[Group:{reply['to']}] {reply['from']}: {content}")
+                    insert_message(db_conn, 'group', reply['from'], reply['to'], reply['to'], content, reply.get('timestamp', datetime.now().isoformat()), 'received')
+                else:
+                    print(f"\n[{reply['from']}] ➜ You: {reply['payload']}")
+                print("Command (/list, /msg <user> content, /msg_file <user> <file>, /create_group <name>, /join_group <name>, /list_group, /msg_group <group> <message>, /delete_group <name>, /quit): ", end="", flush=True)
             except Exception as e:
                 print(f"[Decrypt] Failed: {e}")
                 continue
@@ -184,6 +273,8 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             cmd = input("Command: ").strip()
             if cmd.lower() == '/quit':
                 break
+
+            valid_name = r'^[a-zA-Z0-9_]+$'
             if cmd.lower() == '/list':
                 list_msg = {
                     "type": "command",
@@ -198,9 +289,17 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             if cmd.lower() == '/history':
                 print_history(db_conn)
                 continue
-            msg_match = re.match(r'/msg\s+(\S+)\s+(.+)', cmd)
+
+            # 支持 /msg <user> 内容 格式
+            #\s+：匹配一个或多个空白字符（空格、Tab等）
+            #(\S+)：匹配并捕获目标用户名，由一个或多个非空白字符组成
+            #. 匹配除换行符 \n 之外的任何单字符一个或多个。
+            msg_match = re.match(r'/msg\s+([a-zA-Z0-9_]+)\s+(.+)', cmd)
             if msg_match:
                 target = msg_match.group(1)
+                if not re.match(valid_name, target):
+                    print(f"Invalid username: '{target}'. Usernames can only contain letters, numbers, and underscores.")
+                    continue
                 content = msg_match.group(2)
                 if not target or target == name:
                     print("Invalid target user.")
@@ -253,9 +352,14 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                     print(f"[Encrypt] Failed: {e}")
                     continue
                 continue
-            create_group_match = re.match(r'/create_group\s+(\S+)', cmd)
+            # ==== Group Management Commands ====
+            # 创建group 格式：/create_group <group_name>
+            create_group_match = re.match(r'/create_group\s+([a-zA-Z0-9_]+)', cmd)
             if create_group_match:
                 group_name = create_group_match.group(1)
+                if not re.match(valid_name, group_name):
+                    print(f"Invalid group name: '{group_name}'. Group names can only contain letters, numbers, and underscores.")
+                    continue
                 group_cmd = {
                     "type": "create_group",
                     "from": name,

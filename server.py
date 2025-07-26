@@ -15,6 +15,11 @@ import secrets
 from database_manager import DatabaseManager
 from user_manager import UserManager
 
+from schemas import parse_and_validate_message
+import pyclamd
+import magic
+
+
 #load .env file
 load_dotenv("wg.env")
 
@@ -365,6 +370,20 @@ def handle_client(conn, addr, name):
                 break
             try:
                 msg = aes_decrypt(data)
+                #safety clearance
+                msg['from'] = name #prevent impersonate someone
+                #print(msg['payload'])
+                msg['payload']=msg['payload'][:1000] # truncate the message to avoid overflow
+                #print(msg['payload'])
+                print("RAW JSON:", data.decode())
+                parse_and_validate_message(json.dumps(msg))
+                datetime.fromisoformat(msg['timestamp']) # ensure the format is not tampered
+                allowed_fields = ["nonce","from", "to", "payload", "payload_type", "timestamp", "type", "to_type", "content", "content_type", "payload_id", "file_path"]
+                for field_index in msg.keys():
+                    if field_index in allowed_fields:
+                        pass
+                    else:
+                        raise Exception("unallowed field found!!")
                 payload = msg.get('payload', '')
                 payload_type = msg.get('payload_type', '')
                 type=msg.get('type', '')
@@ -562,25 +581,64 @@ def handle_client(conn, addr, name):
                                 conn.sendall(aes_encrypt(response))
                                 continue
                             # 读取文件内容并 base64 编码
-                            # # maximum file size 10MB
-                            # try:
-                            #     with open(file_path, 'rb') as f:
-                            #         file_bytes = f.read(10 * 1024 * 1024 + 1)
-                            #     if len(file_bytes) > 10 * 1024 * 1024:
-                            #         raise Exception("File too large (max 10MB)")
-                            #     file_b64 = base64.b64encode(file_bytes).decode()
-                            # except Exception as e:
-                            #     response = {
-                            #         "type": "message",
-                            #         "from": "server",
-                            #         "to": name,
-                            #         "to_type": "user",
-                            #         "payload": f"File error: {e}",
-                            #         "payload_type": "text",
-                            #         "timestamp": datetime.now().isoformat()
-                            #     }
-                            #     conn.sendall(json.dumps(response).encode())
-                            #     continue
+                            # maximum file size 10MB
+                            try:
+                                with open(file_path, 'rb') as f:
+                                    file_bytes = f.read(10 * 1024 * 1024 + 1)
+                                if len(file_bytes) > 10 * 1024 * 1024:
+                                    raise Exception("File too large (max 10MB)")
+                                '''ALLOWED_MIME_CATEGORIES = [
+                                    "ASCII text",
+                                    "UTF-8 Unicode text",
+                                    "ISO-8859 text",
+                                    "UTF-16",
+                                    "PDF document",
+                                    "Microsoft Word",
+                                    'OpenDocument Text',
+                                    "Microsoft PowerPoint",
+                                    'OpenDocument Presentation',
+                                    "Microsoft Excel",
+                                    "OpenDocument Spreadsheet",
+                                    'ISO Media, MPEG v4 system',
+                                    "RIFF (little-endian) data, AVI",
+                                    "Microsoft ASF",
+                                    "Matroska data",
+                                    "QuickTime Movie",
+                                    "JPEG image data",
+                                    "PNG image data",
+                                    "GIF image data",
+                                    "PC bitmap",
+                                    "SVG image",
+                                    "MPEG ADTS, layer III",
+                                    "RIFF (little-endian) data, WAVE audio"
+                                ]
+                                file_type=magic.from_buffer(file_bytes)
+                                print(file_type)
+                                type_allowed=False
+                                for i in ALLOWED_MIME_CATEGORIES:
+                                    if file_type.startswith(i)==True:
+                                        type_allowed=True
+                                if type_allowed==False:
+                                    raise Exception
+                                # Scan the byte stream
+                                result = cd.scan_stream(file_bytes)
+                                if result is None:
+                                    print("File is clean.")
+                                else:
+                                    print("Virus found:", result)'''
+                                file_b64 = base64.b64encode(file_bytes).decode()
+                            except Exception as e:
+                                response = {
+                                    "type": "message",
+                                    "from": "server",
+                                    "to": name,
+                                    "to_type": "user",
+                                    "payload": f"File error: {e}",
+                                    "payload_type": "text",
+                                    "timestamp": datetime.now().isoformat()
+                                }
+                                conn.sendall(json.dumps(response).encode())
+                                continue
                             file_request = {
                                 "type": "message_file",
                                 "from": name,
