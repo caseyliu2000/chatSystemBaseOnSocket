@@ -8,7 +8,6 @@ import base64
 from dotenv import load_dotenv
 import os
 from schemas import parse_and_validate_message
-from schemas import parse_and_validate_message
 import pyclamd
 import magic
 
@@ -70,7 +69,6 @@ groups = {}
 # user_groups 结构: {user_name: [group_names]}
 user_groups = {}
 
-cd = pyclamd.ClamdUnixSocket()
 
 def allocate_client_ip():
     for i in range(CLIENT_IP_START, CLIENT_IP_END + 1):
@@ -313,7 +311,7 @@ def handle_client(conn, addr, name):
                 print("RAW JSON:", data.decode())
                 parse_and_validate_message(json.dumps(msg))
                 datetime.fromisoformat(msg['timestamp']) # ensure the format is not tampered
-                allowed_fields = ["from", "to", "payload", "payload_type", "timestamp", "type", "to_type", "content", "content_type", "payload_id", "file_path"]
+                allowed_fields = ["nonce","from", "to", "payload", "payload_type", "timestamp", "type", "to_type", "content", "content_type", "payload_id", "file_path"]
                 for field_index in msg.keys():
                     if field_index in allowed_fields:
                         pass
@@ -451,7 +449,7 @@ def handle_client(conn, addr, name):
                                     file_bytes = f.read(10 * 1024 * 1024 + 1)
                                 if len(file_bytes) > 10 * 1024 * 1024:
                                     raise Exception("File too large (max 10MB)")
-                                ALLOWED_MIME_CATEGORIES = [
+                                '''ALLOWED_MIME_CATEGORIES = [
                                     "ASCII text",
                                     "UTF-8 Unicode text",
                                     "ISO-8859 text",
@@ -489,7 +487,7 @@ def handle_client(conn, addr, name):
                                 if result is None:
                                     print("File is clean.")
                                 else:
-                                    print("Virus found:", result)
+                                    print("Virus found:", result)'''
                                 file_b64 = base64.b64encode(file_bytes).decode()
                             except Exception as e:
                                 response = {

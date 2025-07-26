@@ -11,10 +11,15 @@ import sqlite3
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 import secrets
 
+from schemas import parse_and_validate_message
+import pyclamd
+import magic
+
 # 256bit密钥（32字节），实际部署时请安全存储
 AES_KEY = b"0123456789abcdef0123456789abcdef"  # 示例密钥，实际请更换
 NONCE_SIZE = 12  # 12字节
 MAX_PLAINTEXT_LEN = 512  # 512字节
+cd = pyclamd.ClamdUnixSocket()
 
 def aes_encrypt(plaintext: bytes) -> (str, str):
     """加密，返回base64密文和base64 nonce"""
@@ -59,7 +64,6 @@ def insert_message(conn, msg_type, sender, receiver, group_name, content, timest
         (msg_type, sender, receiver, group_name, content, timestamp, direction)
     )
     conn.commit()
-
 def receive_messages(sock):
     while True:
         try:
@@ -83,6 +87,47 @@ def receive_messages(sock):
                         file_bytes = base64.b64decode(file_b64)
                         with open(save_name, "wb") as f:
                             f.write(file_bytes)
+                        ALLOWED_MIME_CATEGORIES = [
+                            "ASCII text",
+                            "UTF-8 Unicode text",
+                            "ISO-8859 text",
+                            "UTF-16",
+                            "PDF document",
+                            "Microsoft Word",
+                            'OpenDocument Text',
+                            "Microsoft PowerPoint",
+                            'OpenDocument Presentation',
+                            "Microsoft Excel",
+                            "OpenDocument Spreadsheet",
+                            'ISO Media, MPEG v4 system',
+                            "RIFF (little-endian) data, AVI",
+                            "Microsoft ASF",
+                            "Matroska data",
+                            "QuickTime Movie",
+                            "JPEG image data",
+                            "PNG image data",
+                            "GIF image data",
+                            "PC bitmap",
+                            "SVG image",
+                            "MPEG ADTS, layer III",
+                            "RIFF (little-endian) data, WAVE audio"
+                        ]
+                        file_type=magic.from_buffer(file_bytes)
+                        print(file_type)
+                        type_allowed=False
+                        for i in ALLOWED_MIME_CATEGORIES:
+                            if file_type.startswith(i)==True:
+                                type_allowed=True
+                        if type_allowed==False:
+                            print("File type not allowed:", file_type)
+                            raise Exception
+                        # Scan the byte stream
+                        result = cd.scan_stream(file_bytes)
+                        if result is None:
+                            print("File is clean.")
+                        else:
+                            print("Virus found:", result)
+                            raise Exception
                         print(f"[File] Received file saved as {save_name}")
                     except Exception as e:
                         print(f"[File] Failed to save file: {e}")
