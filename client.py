@@ -95,6 +95,8 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             cmd = input("Command: ").strip()
             if cmd.lower() == '/quit':
                 break
+
+            valid_name = r'^[a-zA-Z0-9_]+$'
             if cmd.lower() == '/list':
                 list_msg = {
                     "from": name,
@@ -109,9 +111,12 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             #\s+：匹配一个或多个空白字符（空格、Tab等）
             #(\S+)：匹配并捕获目标用户名，由一个或多个非空白字符组成
             #. 匹配除换行符 \n 之外的任何单字符一个或多个。
-            msg_match = re.match(r'/msg\s+(\S+)\s+(.+)', cmd)
+            msg_match = re.match(r'/msg\s+([a-zA-Z0-9_]+)\s+(.+)', cmd)
             if msg_match:
                 target = msg_match.group(1)
+                if not re.match(valid_name, target):
+                    print(f"Invalid username: '{target}'. Usernames can only contain letters, numbers, and underscores.")
+                    continue
                 content = msg_match.group(2)
                 if not target or target == name:
                     print("Invalid target user.")
@@ -150,9 +155,12 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 continue
             # ==== Group Management Commands ====
             # 创建group 格式：/create_group <group_name>
-            create_group_match = re.match(r'/create_group\s+(\S+)', cmd)
+            create_group_match = re.match(r'/create_group\s+([a-zA-Z0-9_]+)', cmd)
             if create_group_match:
                 group_name = create_group_match.group(1)
+                if not re.match(valid_name, group_name):
+                    print(f"Invalid group name: '{group_name}'. Group names can only contain letters, numbers, and underscores.")
+                    continue
                 group_cmd = {
                     "from": name,
                     "to": "server",
