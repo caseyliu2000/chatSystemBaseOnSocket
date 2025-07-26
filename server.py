@@ -79,6 +79,7 @@ AES_KEY = b"0123456789abcdef0123456789abcdef"  # 示例密钥，实际请更换
 NONCE_SIZE = 12  # 12字节
 MAX_PLAINTEXT_LEN = 5 * 1024 * 1024  # 5MB
 
+#加密整个json message + nonce
 def aes_encrypt(message_dict: dict) -> bytes:
     message_bytes = json.dumps(message_dict, ensure_ascii=False).encode("utf-8")
     nonce = secrets.token_bytes(NONCE_SIZE)
@@ -86,6 +87,7 @@ def aes_encrypt(message_dict: dict) -> bytes:
     ct = aesgcm.encrypt(nonce, message_bytes, None)
     return nonce + ct
 
+#解密整个json message + nonce
 def aes_decrypt(data: bytes) -> dict:
     if len(data) < NONCE_SIZE:
         raise ValueError("Data too short for nonce+ciphertext")
@@ -365,7 +367,7 @@ def handle_client(conn, addr, name):
                         "payload_type": "text",
                         "timestamp": datetime.now().isoformat()
                         }
-                    conn.sendall(json.dumps(warning_msg).encode())
+                    conn.sendall(aes_encrypt(warning_msg))
                     print(f"[Rate Limit] User {name} is flooding. Message ignored.")
                     continue # 用 continue 跳过后面的代码，直接等下一条消息
 
