@@ -2,7 +2,7 @@ from dotenv import load_dotenv
 import os
 
 #默认使用defaultdb，如果需要使用其他db，请修改DATABASE_URL
-DATABASE_URL = "postgresql://casey123:e3_zqOYLGKJAelKYksT-bA@smiley-mule-7838.jxf.gcp-asia-southeast1.cockroachlabs.cloud:26257/defaultdb?sslmode=verify-full"
+DATABASE_URL = "postgresql://casey123:<password>@smiley-mule-7838.jxf.gcp-asia-southeast1.cockroachlabs.cloud:26257/defaultdb?sslmode=verify-full"
 import psycopg2
 # load_dotenv("wg.env")#載入環境变量
 # DATABASE_URL = os.getenv("DATABASE_URL")
