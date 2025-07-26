@@ -40,23 +40,23 @@ import psycopg2
 # /defaultdb?sslmode=verify-full"
 #postgresql://<user>@<host>:<port>/<dbname>?sslmode=verify-full&sslrootcert=<path>&sslcert=<path>&sslkey=<path>
 
-''' 基本配置 remoteDB. 
-conn=psycopg2.connect(
-    dbname="group5",
-    user="group9",
-    host="68.168.213.252",#own server ip
-    port=26257,
-    sslmode="verify-full",
-    sslrootcert="certs/ca.crt",
-    sslcert="certs/client.group9.crt",
-    sslkey="certs/client.group9.key"
-)
-'''
-CRDB_URL="postgresql://group9@68.168.213.252:26257/group5?sslmode=verify-full&sslrootcert=certs/ca.crt&sslcert=certs/client.group9.crt&sslkey=certs/client.group9.key"
-conn = psycopg2.connect(CRDB_URL)
+# ''' 基本配置 remoteDB. 
+# conn=psycopg2.connect(
+#     dbname="group5",
+#     user="group9",
+#     host="68.168.213.252",#own server ip
+#     port=26257,
+#     sslmode="verify-full",
+#     sslrootcert="certs/ca.crt",
+#     sslcert="certs/client.group9.crt",
+#     sslkey="certs/client.group9.key"
+# )
+# '''
+# CRDB_URL="postgresql://group9@68.168.213.252:26257/group5?sslmode=verify-full&sslrootcert=certs/ca.crt&sslcert=certs/client.group9.crt&sslkey=certs/client.group9.key"
+# conn = psycopg2.connect(CRDB_URL)
 
-with conn.cursor() as cur:
-    cur.execute("SHOW TABLES;")
-    res = cur.fetchall()
-    conn.commit()
-    print(res)
+# with conn.cursor() as cur:
+#     cur.execute("SHOW TABLES;")
+#     res = cur.fetchall()
+#     conn.commit()
+#     print(res)
