@@ -7,9 +7,10 @@
 ## 新增功能
 
 ### 1. 数据库管理
-- 使用SQLite本地数据库替代CockroachDB
+- 支持SQLite本地数据库和CockroachDB远程数据库
 - 创建了`server_info_table`和`user_info_table`
 - 支持用户注册、查询和状态更新
+- 使用UUID作为用户主键（CockroachDB版本）
 
 ### 2. 用户管理
 - 自动注册新连接的用户
@@ -32,17 +33,27 @@
 ```
 chatSystemBasicCursor/
 ├── server.py                 # 主服务器文件（已增强）
-├── database_manager.py       # 数据库管理模块
+├── server_crdb_wg.py         # CockroachDB版本的服务器文件
+├── database_manager.py       # SQLite数据库管理模块
+├── database_manager_cockroachdb.py  # CockroachDB数据库管理模块
 ├── user_manager.py          # 用户管理模块
 ├── test_group_message.py    # 群组消息测试脚本
+├── test_cockroachdb_connection.py  # CockroachDB连接测试脚本
 └── README_UserLookup.md     # 本文档
 ```
 
 ## 使用方法
 
 ### 1. 启动服务器
+
+**SQLite版本（本地数据库）**：
 ```bash
 python server.py
+```
+
+**CockroachDB版本（远程数据库）**：
+```bash
+python server_crdb_wg.py
 ```
 
 ### 2. 配置环境变量
@@ -127,12 +138,19 @@ PORT_SERVER=65000
 python test_group_message.py
 ```
 
+运行CockroachDB连接测试脚本：
+```bash
+python test_cockroachdb_connection.py
+```
+
 ## 注意事项
 
 1. 确保服务器端口配置正确
 2. 用户查找请求有30秒超时时间
-3. 数据库文件会自动创建在项目根目录
-4. 所有用户信息都会持久化保存
+3. SQLite数据库文件会自动创建在项目根目录
+4. CockroachDB版本需要网络连接和有效的数据库凭据
+5. 所有用户信息都会持久化保存
+6. CockroachDB版本使用UUID作为用户主键，SQLite版本使用自增整数
 
 ## 扩展功能
 
