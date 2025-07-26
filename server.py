@@ -7,6 +7,7 @@ import re
 import base64
 from dotenv import load_dotenv
 import os
+import time
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 import secrets
@@ -52,6 +53,9 @@ allocated_client_ips = set()
 
 # {name: conn} #conn 是socket connection object
 clients = {}
+
+# 用来记录用户发消息的时间戳
+message_timestamps = {}
 
 
 
@@ -339,6 +343,37 @@ def handle_client(conn, addr, name):
                 payload_type = msg.get('payload_type', '')
                 type=msg.get('type', '')
 
+                ### 速率限制逻辑 ###
+                RATE_LIMIT_SECONDS = 10  # 只关心最近10秒
+                RATE_LIMIT_COUNT = 10    # 在这10秒内，最多只能发10条消息
+                current_time = time.time()
+                # 检查用户是否被记录，如果未被记录就加入其中
+                if name not in message_timestamps:
+                    message_timestamps[name] = []
+                
+                # 从用户记录里删掉10秒之前的旧时间点
+                message_timestamps[name] = [t for t in message_timestamps[name] if current_time - t < RATE_LIMIT_SECONDS]
+
+                # 检查用户在最近10秒内发了多少条消息
+                if len(message_timestamps[name]) >= RATE_LIMIT_COUNT:
+                    # 如果超过了10条，就warning，并且不处理这条新消息
+                    warning_msg = {
+                        "type": "system",
+                        "from": "server",
+                        "to": name,
+                        "payload": "You are sending messages too fast. Please wait a moment.",
+                        "payload_type": "text",
+                        "timestamp": datetime.now().isoformat()
+                        }
+                    conn.sendall(json.dumps(warning_msg).encode())
+                    print(f"[Rate Limit] User {name} is flooding. Message ignored.")
+                    continue # 用 continue 跳过后面的代码，直接等下一条消息
+
+                # 如果没有超过限制，就把这次的发言时间记录
+                message_timestamps[name].append(current_time)
+
+
+                
                 # 命令处理
                 if payload_type == 'command':
                     # ==== Group Management Commands ====
@@ -777,6 +812,10 @@ def handle_client(conn, addr, name):
                 continue
         except:
             break
+
+    # 用户断开连接时，清理他的时间戳记录
+    if name in message_timestamps:
+        del message_timestamps[name]
 
     print(f"{name} disconnected")
     conn.close()
