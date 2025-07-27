@@ -8,7 +8,9 @@ class DatabaseManagerCockroachDB:
     def __init__(self):
         """初始化CockroachDB数据库管理器"""
         # 使用testCockRoachDB_local.py中的连接字符串
-        self.DATABASE_URL = "postgresql://casey123:e3_zqOYLGKJAelKYksT-bA@smiley-mule-7838.jxf.gcp-asia-southeast1.cockroachlabs.cloud:26257/defaultdb?sslmode=verify-full"
+        # local db: DATABASE_URL="postgresql://casey123:e3_zqOYLGKJAelKYksT-bA@smiley-mule-7838.jxf.gcp-asia-southeast1.cockroachlabs.cloud:26257/defaultdb?sslmode=verify-full"
+        # remote db: CRDB_URL="postgresql://group9@68.168.213.252:26257/group9?sslmode=verify-full&sslrootcert=certs/ca.crt&sslcert=certs/client.group9.crt&sslkey=certs/client.group9.key"
+        self.DATABASE_URL = "postgresql://group9@68.168.213.252:26257/group9?sslmode=verify-full&sslrootcert=certs/ca.crt&sslcert=certs/client.group9.crt&sslkey=certs/client.group9.key"
         self.init_database()
     
     def get_connection(self):
@@ -33,10 +35,10 @@ class DatabaseManagerCockroachDB:
                 )
             """)
             
-            # 创建user_info_table，使用UUID作为主键
+            # 创建user_info_table，使用BIGINT作为主键
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS user_info_table (
-                    user_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    user_id BIGINT PRIMARY KEY,
                     username CHAR(64) UNIQUE NOT NULL,
                     display_name VARCHAR(256),
                     last_seen TIMESTAMP,
@@ -49,21 +51,29 @@ class DatabaseManagerCockroachDB:
             conn.commit()
             print(f"[Database] CockroachDB database initialized")
     
-    def add_user(self, username: str, display_name: str = None, user_pubkey: bytes = None, latest_ip: bytes = None) -> str:
-        """添加新用户，返回用户UUID"""
+    def get_next_user_id(self) -> int:
+        """获取下一个可用的用户ID"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COALESCE(MAX(user_id), 0) + 1 FROM user_info_table")
+            result = cursor.fetchone()
+            return result[0] if result else 1
+    
+    def add_user(self, username: str, display_name: str = None, user_pubkey: bytes = None, latest_ip: bytes = None) -> int:
+        """添加新用户，返回用户BIGINT ID"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             current_time = datetime.now()
-            user_uuid = str(uuid.uuid4())
+            user_id = self.get_next_user_id()
             
             cursor.execute("""
                 INSERT INTO user_info_table (user_id, username, display_name, last_seen, user_pubkey, latest_ip)
                 VALUES (%s, %s, %s, %s, %s, %s)
-            """, (user_uuid, username, display_name, current_time, user_pubkey, latest_ip))
+            """, (user_id, username, display_name, current_time, user_pubkey, latest_ip))
             
             conn.commit()
-            print(f"[Database] Added user {username} with UUID {user_uuid}")
-            return user_uuid
+            print(f"[Database] Added user {username} with ID {user_id}")
+            return user_id
     
     def get_user_by_username(self, username: str) -> Optional[Dict[str, Any]]:
         """根据用户名获取用户信息"""
@@ -87,8 +97,8 @@ class DatabaseManagerCockroachDB:
                 }
             return None
     
-    def get_user_by_id(self, user_id: str) -> Optional[Dict[str, Any]]:
-        """根据用户UUID获取用户信息"""
+    def get_user_by_id(self, user_id: int) -> Optional[Dict[str, Any]]:
+        """根据用户ID获取用户信息"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -231,3 +241,8 @@ class DatabaseManagerCockroachDB:
         except Exception as e:
             print(f"[Database] Connection test failed: {e}")
             return False 
+
+# # 测试连接
+if __name__ == "__main__":
+    db_manager = DatabaseManagerCockroachDB()
+    db_manager.test_connection()
