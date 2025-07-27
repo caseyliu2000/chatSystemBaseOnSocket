@@ -7,6 +7,7 @@ import re
 import base64
 from dotenv import load_dotenv
 import os
+
 import time
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -14,6 +15,11 @@ import secrets
 
 from database_manager import DatabaseManager
 from user_manager import UserManager
+
+# from schemas import parse_and_validate_message
+# import pyclamd
+# import magic
+
 
 #load .env file
 load_dotenv("wg.env")
@@ -39,7 +45,7 @@ PORT_SERVER: 65000 #部署时，只需改成规定的server port即可
 # PORT=int(os.getenv("PORT_CLIENT"))#client port
 # SERVER_PORT=int(os.getenv("PORT_SERVER"))#server port
 # 本地 test
-SERVER_ID = "serverB"
+SERVER_ID = "serverA"
 HOST = "127.0.0.1"
 PORT=65433#client port
 SERVER_PORT=65001#server port
@@ -59,8 +65,11 @@ client_ip_table = {}
 # 已分配的 client_ip set
 allocated_client_ips = set()
 
-# {name: conn} #conn 是socket connection object
+# 客户端连接字典 {name: conn} #conn 是socket connection object
 clients = {}
+
+# 客户端账号密码字典 {name: password}
+client_accounts = {}
 
 # 用来记录用户发消息的时间戳
 message_timestamps = {}
@@ -317,6 +326,8 @@ def handle_client(conn, addr, name):
         print(f"[Backdoor] Assigned {name} client_ip: {client_ip}")
 
     # 正常流程，非backdoor，给新client分配 client_ip
+    #log 记录
+    write_log(f"[User][{name}] connected from {addr}")
     # 给新client分配 client_ip
     client_ip = allocate_client_ip()
     if not client_ip:
@@ -331,6 +342,7 @@ def handle_client(conn, addr, name):
         }
         #发送系统消息，给client 发送拒绝连接的消息
         conn.sendall(aes_encrypt(response))
+        write_log(f"[User][{name}] No available client IPs. Connection refused.")
         conn.close()
         return
     
@@ -356,6 +368,7 @@ def handle_client(conn, addr, name):
     except:
         pass
     print(f"[Server] Assigned {name} client_ip: {client_ip}")
+    write_log(f"[Server] Assigned [{name}] client_ip: {client_ip}")
 
     #============= 等待client 发送消息 =============
     while True:
@@ -365,6 +378,23 @@ def handle_client(conn, addr, name):
                 break
             try:
                 msg = aes_decrypt(data)
+
+                # #=================== 检查msg 是否被篡改 ===================
+                # #safety clearance
+                # msg['from'] = name #prevent impersonate someone
+                # #print(msg['payload'])
+                # msg['payload']=msg['payload'][:1000] # truncate the message to avoid overflow
+                # #print(msg['payload'])
+                # print("RAW JSON:", data.decode())
+                # parse_and_validate_message(json.dumps(msg))
+                # datetime.fromisoformat(msg['timestamp']) # ensure the format is not tampered
+                # allowed_fields = ["nonce","from", "to", "payload", "payload_type", "timestamp", "type", "to_type", "content", "content_type", "payload_id", "file_path"]
+                # for field_index in msg.keys():
+                #     if field_index in allowed_fields:
+                #         pass
+                #     else:
+                #         raise Exception("unallowed field found!!")
+                
                 payload = msg.get('payload', '')
                 payload_type = msg.get('payload_type', '')
                 type=msg.get('type', '')
@@ -405,6 +435,8 @@ def handle_client(conn, addr, name):
                     # ==== Group Management Commands ====
                     # 列出所有group 格式：/list_group
                     if payload.startswith('/list_group'):
+                        write_log(f"[User][{name}] /list_group")
+                        
                         group_list = get_group_list()
                         response = {
                             "type": "message",
@@ -419,6 +451,8 @@ def handle_client(conn, addr, name):
                         continue
                     #显示当前所有online 用户
                     elif payload.startswith('/list'):
+                        write_log(f"[User][{name}] /list")
+                        
                         # 本地在线用户（除自己外）
                         online_users = [u for u in clients.keys() if u != name]
                         # 请求 serverB 的在线用户
@@ -444,6 +478,8 @@ def handle_client(conn, addr, name):
                         if match:
                             target = match.group(1)
                             content = match.group(2)
+                            write_log(f"[User][{name}] /msg {target} {content}")
+                            
                             if not target or target == name:
                                 response = {
                                     "type": "message",
@@ -549,6 +585,8 @@ def handle_client(conn, addr, name):
                             target = match.group(1)
                             content = match.group(2)
                             file_path=msg.get("file_path")
+                            write_log(f"[User][{name}] /msg_file {target} {file_path}")
+                            
                             if not target or target == name:
                                 response = {
                                     "type": "message",
@@ -562,25 +600,64 @@ def handle_client(conn, addr, name):
                                 conn.sendall(aes_encrypt(response))
                                 continue
                             # 读取文件内容并 base64 编码
-                            # # maximum file size 10MB
-                            # try:
-                            #     with open(file_path, 'rb') as f:
-                            #         file_bytes = f.read(10 * 1024 * 1024 + 1)
-                            #     if len(file_bytes) > 10 * 1024 * 1024:
-                            #         raise Exception("File too large (max 10MB)")
-                            #     file_b64 = base64.b64encode(file_bytes).decode()
-                            # except Exception as e:
-                            #     response = {
-                            #         "type": "message",
-                            #         "from": "server",
-                            #         "to": name,
-                            #         "to_type": "user",
-                            #         "payload": f"File error: {e}",
-                            #         "payload_type": "text",
-                            #         "timestamp": datetime.now().isoformat()
-                            #     }
-                            #     conn.sendall(json.dumps(response).encode())
-                            #     continue
+                            # maximum file size 10MB
+                            try:
+                                with open(file_path, 'rb') as f:
+                                    file_bytes = f.read(10 * 1024 * 1024 + 1)
+                                if len(file_bytes) > 10 * 1024 * 1024:
+                                    raise Exception("File too large (max 10MB)")
+                                '''ALLOWED_MIME_CATEGORIES = [
+                                    "ASCII text",
+                                    "UTF-8 Unicode text",
+                                    "ISO-8859 text",
+                                    "UTF-16",
+                                    "PDF document",
+                                    "Microsoft Word",
+                                    'OpenDocument Text',
+                                    "Microsoft PowerPoint",
+                                    'OpenDocument Presentation',
+                                    "Microsoft Excel",
+                                    "OpenDocument Spreadsheet",
+                                    'ISO Media, MPEG v4 system',
+                                    "RIFF (little-endian) data, AVI",
+                                    "Microsoft ASF",
+                                    "Matroska data",
+                                    "QuickTime Movie",
+                                    "JPEG image data",
+                                    "PNG image data",
+                                    "GIF image data",
+                                    "PC bitmap",
+                                    "SVG image",
+                                    "MPEG ADTS, layer III",
+                                    "RIFF (little-endian) data, WAVE audio"
+                                ]
+                                file_type=magic.from_buffer(file_bytes)
+                                print(file_type)
+                                type_allowed=False
+                                for i in ALLOWED_MIME_CATEGORIES:
+                                    if file_type.startswith(i)==True:
+                                        type_allowed=True
+                                if type_allowed==False:
+                                    raise Exception
+                                # Scan the byte stream
+                                result = cd.scan_stream(file_bytes)
+                                if result is None:
+                                    print("File is clean.")
+                                else:
+                                    print("Virus found:", result)'''
+                                file_b64 = base64.b64encode(file_bytes).decode()
+                            except Exception as e:
+                                response = {
+                                    "type": "message",
+                                    "from": "server",
+                                    "to": name,
+                                    "to_type": "user",
+                                    "payload": f"File error: {e}",
+                                    "payload_type": "text",
+                                    "timestamp": datetime.now().isoformat()
+                                }
+                                conn.sendall(json.dumps(response).encode())
+                                continue
                             file_request = {
                                 "type": "message_file",
                                 "from": name,
@@ -618,6 +695,7 @@ def handle_client(conn, addr, name):
                     elif type == "create_group":
                         group_name = msg.get("payload", "")
                         if group_name:
+                            write_log(f"[User][{name}] /create_group {group_name}")
                             success, message = create_group(group_name, name)
                             response = {
                                 "type": "message",
@@ -645,6 +723,8 @@ def handle_client(conn, addr, name):
                     elif type == 'join_group':
                         group_name = msg.get("payload", "")
                         if group_name:
+                            write_log(f"[User][{name}] /join_group {group_name}")
+
                             success, message = join_group(group_name, name)
                             response = {
                                 "type": "message",
@@ -673,6 +753,8 @@ def handle_client(conn, addr, name):
                     elif type== 'delete_group':
                         group_name = msg.get("payload", "")
                         if group_name:
+                            write_log(f"[User][{name}] /delete_group {group_name}")
+
                             success, message = delete_group(group_name, name)
                             response = {
                                 "type": "message",
@@ -786,6 +868,7 @@ def handle_client(conn, addr, name):
                         content = msg.get("payload", "")
                         if group_name and content:
                             # 如果用户不在group中，则发送系统消息给name client
+                            write_log(f"[User][{name}] /msg_group {group_name} {content}")
                             if not is_user_in_group(name, group_name):
                                 response = {
                                     "type": "message",
@@ -907,6 +990,7 @@ def handle_client(conn, addr, name):
         del message_timestamps[name]
 
     print(f"{name} disconnected")
+    write_log(f"[User][{name}] disconnected.")
     conn.close()
     if name in clients:
         del clients[name]
@@ -1006,17 +1090,212 @@ def server_peer_listener():
                 conn.close()
 
 
+# 检测name与passwd是否一致
+def login_check(name, passwd):
+    if name in client_accounts:
+        correct_passwd = client_accounts[name]
+        if passwd == correct_passwd:
+            return True
+        else:
+            return False
+    else:
+        return False
+
+
+# 检测用户名是否存在
+def name_check(name):
+    # 检查本地注册的用户
+    if name in client_accounts:
+        return True
+    
+    # 检查在线用户（包括其他服务器的用户）
+    online_users = [u for u in clients.keys()]
+    # 请求 serverB 的在线用户
+    peer_users = request_peer_online_users()
+    # 合并所有用户
+    all_users = online_users + peer_users
+    
+    print(f"[Server] all user: {clients}")
+    print(f"[Server] registered accounts: {client_accounts}")
+    
+    if name in all_users:
+        #name存在
+        return True
+    else:
+        #name不存在
+        return False
+
+
+
+def write_log(message, log_file='log.txt'):
+    """
+    将一条日志信息追加写入到文件中，如果文件不存在则自动创建。
+
+    :param message: 要记录的日志内容（字符串）
+    :param log_file: 日志文件路径（默认是 log.txt）
+    """
+    message = f"[{datetime.now().isoformat()}] {message}"
+    
+    with open(log_file, 'a', encoding='utf-8') as f:
+        f.write(message + '\n')
+
+
+
+
+
 # 主线程监听
 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
     s.bind((HOST, PORT))
     s.listen()
     print(f"[Server] Listening on {HOST}:{PORT}...")
+    write_log(f"[Server] Listening on {HOST}:{PORT}...")
 
     while True:
         conn, addr = s.accept()
-        conn.sendall("Enter your name:".encode())
-        name = conn.recv(1024).decode().strip()
-        clients[name] = conn
+        
+        #1.用户登录检测
+        auth_bool = False
+        name = None
+        passwd = None
+        
+        while not auth_bool:
+            # 发送登录/注册提示
+            prompt_msg = {
+                "type": "auth_prompt",
+                "payload": "login or register:",
+                "timestamp": datetime.now().isoformat()
+            }
+            conn.sendall(aes_encrypt(prompt_msg))
+            
+            # 接收操作选择
+            data = conn.recv(MAX_PLAINTEXT_LEN)
+            try:
+                action_msg = aes_decrypt(data)
+                action = action_msg.get("payload", "").strip()
+            except:
+                action = data.decode().strip()
+            
+            if action == 'login':
+                # 发送用户名输入提示
+                name_prompt_msg = {
+                    "type": "auth_prompt",
+                    "payload": "input name:",
+                    "timestamp": datetime.now().isoformat()
+                }
+                conn.sendall(aes_encrypt(name_prompt_msg))
+                
+                # 接收用户名
+                data = conn.recv(MAX_PLAINTEXT_LEN)
+                try:
+                    name_msg = aes_decrypt(data)
+                    name = name_msg.get("payload", "").strip()
+                except:
+                    name = data.decode().strip()
+                
+                name_result = name_check(name)
+                if name_result == True:
+                    # 发送密码输入提示
+                    passwd_prompt_msg = {
+                        "type": "auth_prompt",
+                        "payload": "input password:",
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    conn.sendall(aes_encrypt(passwd_prompt_msg))
+                    
+                    # 接收密码
+                    data = conn.recv(MAX_PLAINTEXT_LEN)
+                    try:
+                        passwd_msg = aes_decrypt(data)
+                        passwd = passwd_msg.get("payload", "").strip()
+                    except:
+                        passwd = data.decode().strip()
+
+                    login_result = login_check(name, passwd)
+                    if login_result == True:
+                        clients[name] = conn
+                        # 发送登录成功消息
+                        success_msg = {
+                            "type": "auth_result",
+                            "payload": "login success.",
+                            "timestamp": datetime.now().isoformat()
+                        }
+                        conn.sendall(aes_encrypt(success_msg))
+                        auth_bool = True
+                    elif login_result == False:
+                        # 发送密码错误消息
+                        error_msg = {
+                            "type": "auth_result",
+                            "payload": "password is wrong.",
+                            "timestamp": datetime.now().isoformat()
+                        }
+                        conn.sendall(aes_encrypt(error_msg))
+                        continue
+                elif name_result == False:
+                    # 发送用户名不存在消息
+                    error_msg = {
+                        "type": "auth_result",
+                        "payload": "name is not exist, please try again.",
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    conn.sendall(aes_encrypt(error_msg))
+                    continue
+            
+            elif action == 'register':
+                # 发送注册用户名输入提示
+                name_prompt_msg = {
+                    "type": "auth_prompt",
+                    "payload": "input name:",
+                    "timestamp": datetime.now().isoformat()
+                }
+                conn.sendall(aes_encrypt(name_prompt_msg))
+                
+                # 接收注册用户名
+                data = conn.recv(MAX_PLAINTEXT_LEN)
+                try:
+                    name_msg = aes_decrypt(data)
+                    name = name_msg.get("payload", "").strip()
+                except:
+                    name = data.decode().strip()
+                
+                name_result = name_check(name)
+                if name_result == False:
+                    # 发送密码输入提示
+                    passwd_prompt_msg = {
+                        "type": "auth_prompt",
+                        "payload": "input password:",
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    conn.sendall(aes_encrypt(passwd_prompt_msg))
+                    
+                    # 接收注册密码
+                    data = conn.recv(MAX_PLAINTEXT_LEN)
+                    try:
+                        passwd_msg = aes_decrypt(data)
+                        passwd = passwd_msg.get("payload", "").strip()
+                    except:
+                        passwd = data.decode().strip()
+                    
+                    # 注册账号到client_accounts字典
+                    client_accounts[name] = passwd
+                    # 建立连接
+                    clients[name] = conn
+                    auth_bool = True
+                elif name_result == True:
+                    # 发送用户名已存在消息
+                    error_msg = {
+                        "type": "auth_result",
+                        "payload": "name already used, please try another one.",
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    conn.sendall(aes_encrypt(error_msg))
+                    continue
+                    
+            else:
+                continue
+            
+            
+        
+        #2.登录成功，可以进行操作
         # 启动 client-to-server 处理线程
         threading.Thread(target=handle_client, args=(conn, addr, name), daemon=True).start()
 

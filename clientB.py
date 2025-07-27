@@ -11,6 +11,10 @@ import sqlite3
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 import secrets
 
+# from schemas import parse_and_validate_message
+# import pyclamd
+# import magic
+
 # 256bit密钥（32字节），实际部署时请安全存储
 AES_KEY = b"0123456789abcdef0123456789abcdef"  # 示例密钥，实际请更换
 NONCE_SIZE = 12  # 12字节
@@ -33,6 +37,10 @@ def aes_decrypt(data: bytes) -> dict:
     aesgcm = AESGCM(AES_KEY)
     pt = aesgcm.decrypt(nonce, ct, None)
     return json.loads(pt.decode("utf-8"))
+
+#增加hash
+import hashlib
+
 
 #clientA 连接serverA
 #68.168.213.252 #remote server
@@ -57,7 +65,6 @@ def insert_message(conn, msg_type, sender, receiver, group_name, content, timest
         (msg_type, sender, receiver, group_name, content, timestamp, direction)
     )
     conn.commit()
-
 def receive_messages(sock):
     while True:
         try:
@@ -156,9 +163,142 @@ main 方法：
 '''
 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
     s.connect((HOST, PORT))#连接server
-    name_prompt = s.recv(1024).decode()
-    name = input(name_prompt).strip()
-    s.sendall(name.encode())
+    # name_prompt = s.recv(1024).decode()
+    # name = input(name_prompt).strip()
+    # s.sendall(name.encode())
+
+    # # 初始化本地数据库
+    # db_conn = init_db(name)
+
+    
+    #1.进行登录检测
+    auth_bool = False
+    name = None
+    
+    while not auth_bool:
+        # 接收登录/注册提示
+        data = s.recv(MAX_PLAINTEXT_LEN)
+        try:
+            login_or_reg_prompt_msg = aes_decrypt(data)
+            login_or_reg_prompt = login_or_reg_prompt_msg.get("payload", "")
+        except:
+            login_or_reg_prompt = data.decode()
+        
+        action = input(login_or_reg_prompt).strip()
+        
+        # 发送操作选择（登录或注册）
+        action_msg = {
+            "type": "auth_action",
+            "payload": action,
+            "timestamp": datetime.now().isoformat()
+        }
+        s.sendall(aes_encrypt(action_msg))
+        
+        if action == 'login':
+            # 接收用户名输入提示
+            data = s.recv(MAX_PLAINTEXT_LEN)
+            try:
+                login_prompt_msg = aes_decrypt(data)
+                login_prompt = login_prompt_msg.get("payload", "")
+            except:
+                login_prompt = data.decode()
+            
+            name = input(login_prompt).strip()
+            
+            # 发送用户名
+            name_msg = {
+                "type": "auth_username",
+                "payload": name,
+                "timestamp": datetime.now().isoformat()
+            }
+            s.sendall(aes_encrypt(name_msg))
+            
+            # 接收用户名验证结果
+            data = s.recv(MAX_PLAINTEXT_LEN)
+            try:
+                name_result_msg = aes_decrypt(data)
+                name_result = name_result_msg.get("payload", "")
+            except:
+                name_result = data.decode()
+            
+            if name_result == 'input password:':
+                passwd = input(name_result).strip()
+                passwd = hashlib.sha256(passwd.encode()).hexdigest()
+                
+                # 发送密码
+                passwd_msg = {
+                    "type": "auth_password",
+                    "payload": passwd,
+                    "timestamp": datetime.now().isoformat()
+                }
+                s.sendall(aes_encrypt(passwd_msg))
+                
+                # 接收登录结果
+                data = s.recv(MAX_PLAINTEXT_LEN)
+                try:
+                    login_result_msg = aes_decrypt(data)
+                    login_result = login_result_msg.get("payload", "")
+                except:
+                    login_result = data.decode()
+                
+                print(login_result)
+                if login_result == "login success.":
+                    auth_bool = True
+                elif login_result == "password is wrong.":
+                    continue
+            elif name_result == 'name is not exist, please try again.':
+                print('name is not exist, please try again.')
+                continue
+            
+        elif action == 'register':
+            # 接收注册用户名输入提示
+            data = s.recv(MAX_PLAINTEXT_LEN)
+            try:
+                reg_prompt_msg = aes_decrypt(data)
+                reg_prompt = reg_prompt_msg.get("payload", "")
+            except:
+                reg_prompt = data.decode()
+            
+            name = input(reg_prompt).strip()
+            
+            # 发送注册用户名
+            name_msg = {
+                "type": "auth_username",
+                "payload": name,
+                "timestamp": datetime.now().isoformat()
+            }
+            s.sendall(aes_encrypt(name_msg))
+            
+            # 接收用户名验证结果
+            data = s.recv(MAX_PLAINTEXT_LEN)
+            try:
+                name_result_msg = aes_decrypt(data)
+                name_result = name_result_msg.get("payload", "")
+            except:
+                name_result = data.decode()
+            
+            if name_result == 'input password:':
+                passwd = input(name_result).strip()
+                passwd = hashlib.sha256(passwd.encode()).hexdigest()
+                
+                # 发送注册密码
+                passwd_msg = {
+                    "type": "auth_password",
+                    "payload": passwd,
+                    "timestamp": datetime.now().isoformat()
+                }
+                s.sendall(aes_encrypt(passwd_msg))
+                print('register success.')
+                auth_bool = True
+            elif name_result == "name already used, please try another one.":
+                print("name already used, please try another one.")
+                continue 
+            
+        else:
+            continue
+    
+    
+    #2.登录成功后操作
 
     # 初始化本地数据库
     db_conn = init_db(name)
@@ -178,12 +318,14 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
     print("  /quit - Exit")
     receive_thread = threading.Thread(target=receive_messages, args=(s,), daemon=True)
     receive_thread.start()
-
+    
     while True:
         try:
             cmd = input("Command: ").strip()
             if cmd.lower() == '/quit':
                 break
+
+            valid_name = r'^[a-zA-Z0-9_]+$'
             if cmd.lower() == '/list':
                 list_msg = {
                     "type": "command",
@@ -198,9 +340,17 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             if cmd.lower() == '/history':
                 print_history(db_conn)
                 continue
-            msg_match = re.match(r'/msg\s+(\S+)\s+(.+)', cmd)
+            # msg_match = re.match(r'/msg\s+(\S+)\s+(.+)', cmd)
+            # 支持 /msg <user> 内容 格式
+            #\s+：匹配一个或多个空白字符（空格、Tab等）
+            #(\S+)：匹配并捕获目标用户名，由一个或多个非空白字符组成
+            #. 匹配除换行符 \n 之外的任何单字符一个或多个。
+            msg_match = re.match(r'/msg\s+([a-zA-Z0-9_]+)\s+(.+)', cmd)
             if msg_match:
                 target = msg_match.group(1)
+                if not re.match(valid_name, target):
+                    print(f"Invalid username: '{target}'. Usernames can only contain letters, numbers, and underscores.")
+                    continue
                 content = msg_match.group(2)
                 if not target or target == name:
                     print("Invalid target user.")
@@ -253,9 +403,15 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                     print(f"[Encrypt] Failed: {e}")
                     continue
                 continue
-            create_group_match = re.match(r'/create_group\s+(\S+)', cmd)
+            # create_group_match = re.match(r'/create_group\s+(\S+)', cmd)
+            # ==== Group Management Commands ====
+            # 创建group 格式：/create_group <group_name>
+            create_group_match = re.match(r'/create_group\s+([a-zA-Z0-9_]+)', cmd)
             if create_group_match:
                 group_name = create_group_match.group(1)
+                if not re.match(valid_name, group_name):
+                    print(f"Invalid group name: '{group_name}'. Group names can only contain letters, numbers, and underscores.")
+                    continue
                 group_cmd = {
                     "type": "create_group",
                     "from": name,

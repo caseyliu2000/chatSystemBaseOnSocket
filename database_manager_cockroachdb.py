@@ -247,7 +247,7 @@ class DatabaseManagerCockroachDB:
             print(f"[Database] Connection test failed: {e}")
             return False 
 
-# # 测试连接
-if __name__ == "__main__":
-    db_manager = DatabaseManagerCockroachDB()
-    db_manager.test_connection()
+# # # 测试连接
+# if __name__ == "__main__":
+#     db_manager = DatabaseManagerCockroachDB()
+#     db_manager.test_connection()
