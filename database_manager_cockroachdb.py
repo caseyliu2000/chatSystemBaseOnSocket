@@ -10,7 +10,7 @@ class DatabaseManagerCockroachDB:
         # 使用testCockRoachDB_local.py中的连接字符串
         # local db: DATABASE_URL="postgresql://casey123:e3_zqOYLGKJAelKYksT-bA@smiley-mule-7838.jxf.gcp-asia-southeast1.cockroachlabs.cloud:26257/defaultdb?sslmode=verify-full"
         # remote db: CRDB_URL="postgresql://group9@68.168.213.252:26257/group9?sslmode=verify-full&sslrootcert=certs/ca.crt&sslcert=certs/client.group9.crt&sslkey=certs/client.group9.key"
-        self.DATABASE_URL = "postgresql://group9@68.168.213.252:26257/group9?sslmode=verify-full&sslrootcert=certs/ca.crt&sslcert=certs/client.group9.crt&sslkey=certs/client.group9.key"
+        self.DATABASE_URL = "postgresql://casey123:e3_zqOYLGKJAelKYksT-bA@smiley-mule-7838.jxf.gcp-asia-southeast1.cockroachlabs.cloud:26257/defaultdb?sslmode=verify-full"
         self.init_database()
     
     def get_connection(self):

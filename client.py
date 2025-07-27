@@ -176,22 +176,71 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
     name = None
     
     while not auth_bool:
-        login_or_reg_prompt = s.recv(1024).decode()
+        # 接收登录/注册提示
+        data = s.recv(MAX_PLAINTEXT_LEN)
+        try:
+            login_or_reg_prompt_msg = aes_decrypt(data)
+            login_or_reg_prompt = login_or_reg_prompt_msg.get("payload", "")
+        except:
+            login_or_reg_prompt = data.decode()
+        
         action = input(login_or_reg_prompt).strip()
-        s.sendall(action.encode())
+        
+        # 发送操作选择（登录或注册）
+        action_msg = {
+            "type": "auth_action",
+            "payload": action,
+            "timestamp": datetime.now().isoformat()
+        }
+        s.sendall(aes_encrypt(action_msg))
         
         if action == 'login':
-            login_prompt = s.recv(1024).decode()
-            name = input(login_prompt).strip()
-            s.sendall(name.encode())
+            # 接收用户名输入提示
+            data = s.recv(MAX_PLAINTEXT_LEN)
+            try:
+                login_prompt_msg = aes_decrypt(data)
+                login_prompt = login_prompt_msg.get("payload", "")
+            except:
+                login_prompt = data.decode()
             
-            name_result = s.recv(1024).decode()
+            name = input(login_prompt).strip()
+            
+            # 发送用户名
+            name_msg = {
+                "type": "auth_username",
+                "payload": name,
+                "timestamp": datetime.now().isoformat()
+            }
+            s.sendall(aes_encrypt(name_msg))
+            
+            # 接收用户名验证结果
+            data = s.recv(MAX_PLAINTEXT_LEN)
+            try:
+                name_result_msg = aes_decrypt(data)
+                name_result = name_result_msg.get("payload", "")
+            except:
+                name_result = data.decode()
+            
             if name_result == 'input password:':
                 passwd = input(name_result).strip()
                 passwd = hashlib.sha256(passwd.encode()).hexdigest()
-                s.sendall(passwd.encode())
                 
-                login_result = s.recv(1024).decode()
+                # 发送密码
+                passwd_msg = {
+                    "type": "auth_password",
+                    "payload": passwd,
+                    "timestamp": datetime.now().isoformat()
+                }
+                s.sendall(aes_encrypt(passwd_msg))
+                
+                # 接收登录结果
+                data = s.recv(MAX_PLAINTEXT_LEN)
+                try:
+                    login_result_msg = aes_decrypt(data)
+                    login_result = login_result_msg.get("payload", "")
+                except:
+                    login_result = data.decode()
+                
                 print(login_result)
                 if login_result == "login success.":
                     auth_bool = True
@@ -202,15 +251,43 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 continue
             
         elif action == 'register':
-            reg_prompt = s.recv(1024).decode()
-            name = input(reg_prompt).strip()
-            s.sendall(name.encode())
+            # 接收注册用户名输入提示
+            data = s.recv(MAX_PLAINTEXT_LEN)
+            try:
+                reg_prompt_msg = aes_decrypt(data)
+                reg_prompt = reg_prompt_msg.get("payload", "")
+            except:
+                reg_prompt = data.decode()
             
-            name_result = s.recv(1024).decode()
+            name = input(reg_prompt).strip()
+            
+            # 发送注册用户名
+            name_msg = {
+                "type": "auth_username",
+                "payload": name,
+                "timestamp": datetime.now().isoformat()
+            }
+            s.sendall(aes_encrypt(name_msg))
+            
+            # 接收用户名验证结果
+            data = s.recv(MAX_PLAINTEXT_LEN)
+            try:
+                name_result_msg = aes_decrypt(data)
+                name_result = name_result_msg.get("payload", "")
+            except:
+                name_result = data.decode()
+            
             if name_result == 'input password:':
                 passwd = input(name_result).strip()
                 passwd = hashlib.sha256(passwd.encode()).hexdigest()
-                s.sendall(passwd.encode())
+                
+                # 发送注册密码
+                passwd_msg = {
+                    "type": "auth_password",
+                    "payload": passwd,
+                    "timestamp": datetime.now().isoformat()
+                }
+                s.sendall(aes_encrypt(passwd_msg))
                 print('register success.')
                 auth_bool = True
             elif name_result == "name already used, please try another one.":
