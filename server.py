@@ -65,7 +65,8 @@ client_ip_table = {}
 # 已分配的 client_ip set
 allocated_client_ips = set()
 
-# {name: conn} #conn 是socket connection object
+#【old】 {name: conn} #conn 是socket connection object
+#【new】 {name: {passwd: xx, online: bool, sobj: conn}, name:{..}, ..}
 clients = {}
 
 # 用来记录用户发消息的时间戳
@@ -323,6 +324,8 @@ def handle_client(conn, addr, name):
         print(f"[Backdoor] Assigned {name} client_ip: {client_ip}")
 
     # 正常流程，非backdoor，给新client分配 client_ip
+    #log 记录
+    write_log(f"[User][{name}] connected from {addr}")
     # 给新client分配 client_ip
     client_ip = allocate_client_ip()
     if not client_ip:
@@ -337,6 +340,7 @@ def handle_client(conn, addr, name):
         }
         #发送系统消息，给client 发送拒绝连接的消息
         conn.sendall(aes_encrypt(response))
+        write_log(f"[User][{name}] No available client IPs. Connection refused.")
         conn.close()
         return
     
@@ -362,6 +366,7 @@ def handle_client(conn, addr, name):
     except:
         pass
     print(f"[Server] Assigned {name} client_ip: {client_ip}")
+    write_log(f"[Server] Assigned [{name}] client_ip: {client_ip}")
 
     #============= 等待client 发送消息 =============
     while True:
@@ -428,6 +433,8 @@ def handle_client(conn, addr, name):
                     # ==== Group Management Commands ====
                     # 列出所有group 格式：/list_group
                     if payload.startswith('/list_group'):
+                        write_log(f"[User][{name}] /list_group")
+                        
                         group_list = get_group_list()
                         response = {
                             "type": "message",
@@ -442,6 +449,8 @@ def handle_client(conn, addr, name):
                         continue
                     #显示当前所有online 用户
                     elif payload.startswith('/list'):
+                        write_log(f"[User][{name}] /list")
+                        
                         # 本地在线用户（除自己外）
                         online_users = [u for u in clients.keys() if u != name]
                         # 请求 serverB 的在线用户
@@ -467,6 +476,8 @@ def handle_client(conn, addr, name):
                         if match:
                             target = match.group(1)
                             content = match.group(2)
+                            write_log(f"[User][{name}] /msg {target} {content}")
+                            
                             if not target or target == name:
                                 response = {
                                     "type": "message",
@@ -572,6 +583,8 @@ def handle_client(conn, addr, name):
                             target = match.group(1)
                             content = match.group(2)
                             file_path=msg.get("file_path")
+                            write_log(f"[User][{name}] /msg_file {target} {file_path}")
+                            
                             if not target or target == name:
                                 response = {
                                     "type": "message",
@@ -680,6 +693,7 @@ def handle_client(conn, addr, name):
                     elif type == "create_group":
                         group_name = msg.get("payload", "")
                         if group_name:
+                            write_log(f"[User][{name}] /create_group {group_name}")
                             success, message = create_group(group_name, name)
                             response = {
                                 "type": "message",
@@ -707,6 +721,8 @@ def handle_client(conn, addr, name):
                     elif type == 'join_group':
                         group_name = msg.get("payload", "")
                         if group_name:
+                            write_log(f"[User][{name}] /join_group {group_name}")
+
                             success, message = join_group(group_name, name)
                             response = {
                                 "type": "message",
@@ -735,6 +751,8 @@ def handle_client(conn, addr, name):
                     elif type== 'delete_group':
                         group_name = msg.get("payload", "")
                         if group_name:
+                            write_log(f"[User][{name}] /delete_group {group_name}")
+
                             success, message = delete_group(group_name, name)
                             response = {
                                 "type": "message",
@@ -848,6 +866,7 @@ def handle_client(conn, addr, name):
                         content = msg.get("payload", "")
                         if group_name and content:
                             # 如果用户不在group中，则发送系统消息给name client
+                            write_log(f"[User][{name}] /msg_group {group_name} {content}")
                             if not is_user_in_group(name, group_name):
                                 response = {
                                     "type": "message",
@@ -969,9 +988,10 @@ def handle_client(conn, addr, name):
         del message_timestamps[name]
 
     print(f"{name} disconnected")
+    write_log(f"[User][{name}] disconnected.")
     conn.close()
     if name in clients:
-        del clients[name]
+        clients[name]['online'] = False
     if name in client_ip_table:
         release_client_ip(client_ip_table[name])
         del client_ip_table[name]
@@ -1068,17 +1088,113 @@ def server_peer_listener():
                 conn.close()
 
 
+# 检测name与passwd是否一致
+def login_check(name, passwd):
+    correct_passwd = clients[name]['passwd']
+    if passwd==correct_passwd:
+        return True
+    else:
+        return False
+
+
+# 检测用户名是否存在
+def name_check(name):
+    # 本地用户
+    online_users = [u for u in clients.keys()]
+    # 请求 serverB 的在线用户
+    peer_users = request_peer_online_users()
+    # 合并所有用户
+    all_users = online_users + peer_users
+    
+    print(f"[Server] all user: {clients}")
+    
+    if name in all_users:
+        #name存在
+        return True
+    else:
+        #name不存在
+        return False
+
+
+
+def write_log(message, log_file='log.txt'):
+    """
+    将一条日志信息追加写入到文件中，如果文件不存在则自动创建。
+
+    :param message: 要记录的日志内容（字符串）
+    :param log_file: 日志文件路径（默认是 log.txt）
+    """
+    message = f"[{datetime.now().isoformat()}] {message}"
+    
+    with open(log_file, 'a', encoding='utf-8') as f:
+        f.write(message + '\n')
+
+
+
+
+
 # 主线程监听
 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
     s.bind((HOST, PORT))
     s.listen()
     print(f"[Server] Listening on {HOST}:{PORT}...")
+    write_log(f"[Server] Listening on {HOST}:{PORT}...")
 
     while True:
         conn, addr = s.accept()
-        conn.sendall("Enter your name:".encode())
-        name = conn.recv(1024).decode().strip()
-        clients[name] = conn
+        
+        #1.用户登录检测
+        auth_bool = False
+        name = None
+        passwd = None
+        
+        while not auth_bool:
+            conn.sendall("login or register:".encode())
+            action = conn.recv(1024).decode().strip()
+            
+            if action == 'login':
+                conn.sendall("input name:".encode())
+                name = conn.recv(1024).decode().strip()
+                
+                name_result = name_check(name)
+                if name_result == True:
+                    conn.sendall("input password:".encode())
+                    passwd = conn.recv(1024).decode().strip()
+
+                    login_result = login_check(name, passwd)
+                    if login_result == True:
+                        clients[name]['sobj'] = conn
+                        conn.sendall("login success.".encode())
+                        auth_bool = True
+                    elif login_result == False:
+                        # while跳过这一次
+                        conn.sendall("password is wrong.".encode())
+                        continue
+                elif name_result == False:
+                    conn.sendall("name is not exist, please try again.".encode())
+                    continue
+            
+            elif action == 'register':
+                conn.sendall("input name:".encode())
+                name = conn.recv(1024).decode().strip()
+                
+                name_result = name_check(name)
+                if name_result == False:
+                    conn.sendall("input password:".encode())
+                    passwd = conn.recv(1024).decode().strip()
+                    
+                    clients[name] = {'passwd':passwd,'online':True, 'sobj':conn}
+                    auth_bool = True
+                elif name_result == True:
+                    conn.sendall("name already used, please try another one.".encode())
+                    continue
+                    
+            else:
+                continue
+            
+            
+        
+        #2.登录成功，可以进行操作
         # 启动 client-to-server 处理线程
         threading.Thread(target=handle_client, args=(conn, addr, name), daemon=True).start()
 

@@ -38,6 +38,10 @@ def aes_decrypt(data: bytes) -> dict:
     pt = aesgcm.decrypt(nonce, ct, None)
     return json.loads(pt.decode("utf-8"))
 
+#增加hash
+import hashlib
+
+
 #clientA 连接serverA
 #68.168.213.252 #remote server
 HOST = "127.0.0.1"
@@ -159,9 +163,65 @@ main 方法：
 '''
 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
     s.connect((HOST, PORT))#连接server
-    name_prompt = s.recv(1024).decode()
-    name = input(name_prompt).strip()
-    s.sendall(name.encode())
+    # name_prompt = s.recv(1024).decode()
+    # name = input(name_prompt).strip()
+    # s.sendall(name.encode())
+
+    # # 初始化本地数据库
+    # db_conn = init_db(name)
+
+    
+    #1.进行登录检测
+    auth_bool = False
+    name = None
+    
+    while not auth_bool:
+        login_or_reg_prompt = s.recv(1024).decode()
+        action = input(login_or_reg_prompt).strip()
+        s.sendall(action.encode())
+        
+        if action == 'login':
+            login_prompt = s.recv(1024).decode()
+            name = input(login_prompt).strip()
+            s.sendall(name.encode())
+            
+            name_result = s.recv(1024).decode()
+            if name_result == 'input password:':
+                passwd = input(name_result).strip()
+                passwd = hashlib.sha256(passwd.encode()).hexdigest()
+                s.sendall(passwd.encode())
+                
+                login_result = s.recv(1024).decode()
+                print(login_result)
+                if login_result == "login success.":
+                    auth_bool = True
+                elif login_result == "password is wrong.":
+                    continue
+            elif name_result == 'name is not exist, please try again.':
+                print('name is not exist, please try again.')
+                continue
+            
+        elif action == 'register':
+            reg_prompt = s.recv(1024).decode()
+            name = input(reg_prompt).strip()
+            s.sendall(name.encode())
+            
+            name_result = s.recv(1024).decode()
+            if name_result == 'input password:':
+                passwd = input(name_result).strip()
+                passwd = hashlib.sha256(passwd.encode()).hexdigest()
+                s.sendall(passwd.encode())
+                print('register success.')
+                auth_bool = True
+            elif name_result == "name already used, please try another one.":
+                print("name already used, please try another one.")
+                continue 
+            
+        else:
+            continue
+    
+    
+    #2.登录成功后操作
 
     # 初始化本地数据库
     db_conn = init_db(name)
@@ -181,7 +241,7 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
     print("  /quit - Exit")
     receive_thread = threading.Thread(target=receive_messages, args=(s,), daemon=True)
     receive_thread.start()
-
+    
     while True:
         try:
             cmd = input("Command: ").strip()
