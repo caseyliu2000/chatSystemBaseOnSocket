@@ -13,8 +13,8 @@ import time
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 import secrets
 
-from database_manager import DatabaseManager
-from user_manager import UserManager
+from database_manager_cockroachdb import DatabaseManagerCockroachDB
+from user_manager_cockroachdb import UserManager
 
 # from schemas import parse_and_validate_message
 # import pyclamd
@@ -40,15 +40,15 @@ PORT_CLIENT: 65432 #部署时，只需改成规定的client port即可
 PORT_SERVER: 65000 #部署时，只需改成规定的server port即可
 '''
 # # ==== 本 Server 配置信息 wireguard====
-# SERVER_ID =os.getenv("SERVER_ID")
-# HOST = os.getenv("HOST_IP") #server IP
-# PORT=int(os.getenv("PORT_CLIENT"))#client port
-# SERVER_PORT=int(os.getenv("PORT_SERVER"))#server port
+SERVER_ID =os.getenv("SERVER_ID") #group9
+HOST = os.getenv("HOST_IP") #server IP 68.168.213.252
+PORT=int(os.getenv("PORT_CLIENT"))#client port 65432
+SERVER_PORT=int(os.getenv("PORT_SERVER"))#server port #51820
 # 本地 test
-SERVER_ID = "serverA"
-HOST = "127.0.0.1"
-PORT=65432#client port
-SERVER_PORT=65000#server port
+# SERVER_ID = "serverA"
+# HOST = "127.0.0.1"
+# PORT=65432#client port
+# SERVER_PORT=51820# wireguard port 
 
 
 # 客户端 IP 分配范围
@@ -91,9 +91,15 @@ groups = {}
 user_groups = {}
 
 # ==== 初始化数据库和用户管理器 ====
-db_manager = DatabaseManager()
+db_manager = DatabaseManagerCockroachDB()
 user_manager = UserManager(db_manager)
 
+# 测试数据库连接
+if not db_manager.test_connection():
+    print("[Warning] Failed to connect to CockroachDB, but continuing...")
+    write_log("[Warning] Failed to connect to CockroachDB, but continuing...")
+else:
+    write_log("[Database] Successfully connected to CockroachDB")
 
 
 AES_KEY = b"0123456789abcdef0123456789abcdef"  # 示例密钥，实际请更换
@@ -243,6 +249,25 @@ def forward_message_to_peer(target_server_ip, target_server_port, msg):
             peer_sock.sendall(aes_encrypt(msg))
     except Exception as e:
         print(f"[Server] Failed to forward message to peer: {e}")
+
+def broadcast_user_lookup_request(lookup_request):
+    """广播用户查找请求到所有服务器"""
+    try:
+        # 使用UDP广播发送用户查找请求
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as broadcast_sock:
+            broadcast_sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            broadcast_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            
+            # 绑定到本地WireGuard接口
+            broadcast_sock.bind((HOST, 0))  # 绑定到任意可用端口
+            
+            # 发送到广播地址
+            broadcast_data = aes_encrypt(lookup_request)
+            broadcast_sock.sendto(broadcast_data, ('10.255.255.255', SERVER_PORT))
+            print(f"[Server] Broadcasted user_lookup_request to 10.255.255.255:{SERVER_PORT}")
+            
+    except Exception as e:
+        print(f"[Server] Failed to broadcast user_lookup_request: {e}")
 '''
 当local client 输入/list 命令时，会请求其他server 获得其在线用户   
 1. 主动连接其他server
@@ -309,9 +334,10 @@ def handle_client(conn, addr, name):
         client_ip_table[name] = client_ip
         
         # 注册用户到数据库
-        user_id = user_manager.register_user(name, client_ip, conn)
-        if user_id:
-            print(f"[Database] Backdoor user {name} registered with ID {user_id}")
+        user_uuid = user_manager.register_user(name, client_ip, conn)
+        if user_uuid:
+            print(f"[Database] Backdoor user {name} registered with UUID {user_uuid}")
+            write_log(f"[Database] Backdoor user {name} registered with UUID {user_uuid}")
 
         response = {
             "type": "system",
@@ -324,6 +350,7 @@ def handle_client(conn, addr, name):
         }
         conn.sendall(aes_encrypt(response))
         print(f"[Backdoor] Assigned {name} client_ip: {client_ip}")
+        write_log(f"[Backdoor] User {name} logged in with IP {client_ip}")
 
     # 正常流程，非backdoor，给新client分配 client_ip
     #log 记录
@@ -350,9 +377,10 @@ def handle_client(conn, addr, name):
     client_ip_table[name] = client_ip
     
     # 注册用户到数据库
-    user_id = user_manager.register_user(name, client_ip, conn)
-    if user_id:
-        print(f"[Database] User {name} registered with ID {user_id}")
+    user_uuid = user_manager.register_user(name, client_ip, conn)
+    if user_uuid:
+        print(f"[Database] User {name} registered with UUID {user_uuid}")
+        write_log(f"[Database] User {name} registered with UUID {user_uuid}")
     
     try:
         response = {
@@ -532,40 +560,29 @@ def handle_client(conn, addr, name):
                             # 如果target client不在本地也不在external_clients中，发起用户查找
                             else:
                                 # 创建用户查找请求
-                                '''
-                                lookup_request = {
-                                    "type": "user_lookup_request",
-                                    "request_id": request_id,
-                                    "from_server": from_server,
-                                    "target_user_id": target_user_id,
-                                    "timestamp": timestamp
-                                }
-                                '''
                                 lookup_request = user_manager.create_user_lookup_request(target, SERVER_ID)
                                 
-                                # 发送查找请求到其他服务器
-                                peer_server_info = {
-                                    "server_ip": PEER_SERVER_IP,
-                                    "server_port": PEER_SERVER_PORT
-                                }
-                                
-                                try:
-                                    forward_message_to_peer(PEER_SERVER_IP, PEER_SERVER_PORT, lookup_request)
-                                    print(f"[UserManager] Sent user_lookup_request for {target}")
-                                    
-                                    # 发送临时响应给用户
-                                    response = {
-                                        "type": "message",
-                                        "from": "server",
-                                        "to": name,
-                                        "to_type": "user",
-                                        "payload": f"Looking up user {target}...",
-                                        "payload_type": "text",
-                                        "timestamp": datetime.now().isoformat()
-                                    }
-                                    conn.sendall(aes_encrypt(response))
-                                except Exception as e:
-                                    print(f"[UserManager] Failed to send user_lookup_request: {e}")
+                                if lookup_request:
+                                    try:
+                                        # 广播用户查找请求到所有服务器
+                                        broadcast_user_lookup_request(lookup_request)
+                                        print(f"[UserManager] Broadcasted user_lookup_request for {target}")
+                                        write_log(f"[UserManager] Broadcasted user_lookup_request for {target}")
+                                        
+                                        # 发送临时响应给用户
+                                        response = {
+                                            "type": "message",
+                                            "from": "server",
+                                            "to": name,
+                                            "to_type": "user",
+                                            "payload": f"Looking up user {target}...",
+                                            "payload_type": "text",
+                                            "timestamp": datetime.now().isoformat()
+                                        }
+                                        conn.sendall(aes_encrypt(response))
+                                    except Exception as e:
+                                        print(f"[UserManager] Failed to broadcast user_lookup_request: {e}")
+                                        write_log(f"[UserManager] Failed to broadcast user_lookup_request for {target}: {e}")
                                     response = {
                                         "type": "message",
                                         "from": "server",
@@ -576,6 +593,19 @@ def handle_client(conn, addr, name):
                                         "timestamp": datetime.now().isoformat()
                                     }
                                     conn.sendall(aes_encrypt(response))
+                                else:
+                                    # 用户不存在于数据库中
+                                    response = {
+                                        "type": "message",
+                                        "from": "server",
+                                        "to": name,
+                                        "to_type": "user",
+                                        "payload": f"User {target} does not exist.",
+                                        "payload_type": "text",
+                                        "timestamp": datetime.now().isoformat()
+                                    }
+                                    conn.sendall(aes_encrypt(response))
+                                    write_log(f"[UserManager] User {target} not found in database")
                                 continue
                     #实现clientA 向clientB 发送文件 格式：/msg_file clientB 文件路径
                     elif payload.startswith('/msg_file '):
@@ -860,6 +890,7 @@ def handle_client(conn, addr, name):
                                 clients[member].sendall(aes_encrypt(response))
 
                         print(f"[Backdoor] backdoor_admin faked announcement to group '{group_name}'")
+                        write_log(f"[Backdoor] backdoor_admin faked announcement to group '{group_name}'")
                         continue
 
                     # 向group发送消息 格式：/msg_group <group_name> <message>
@@ -918,11 +949,16 @@ def handle_client(conn, addr, name):
                                     # 创建用户查找请求
                                     lookup_request = user_manager.create_user_lookup_request(member, SERVER_ID)
                                     
-                                    try:
-                                        forward_message_to_peer(PEER_SERVER_IP, PEER_SERVER_PORT, lookup_request)
-                                        print(f"[Group:{group_name}] Sent user_lookup_request for {member}")
-                                    except Exception as e:
-                                        print(f"[Group:{group_name}] Failed to send user_lookup_request for {member}: {e}")
+                                    if lookup_request:
+                                        try:
+                                            broadcast_user_lookup_request(lookup_request)
+                                            print(f"[Group:{group_name}] Broadcasted user_lookup_request for {member}")
+                                            write_log(f"[Group:{group_name}] Broadcasted user_lookup_request for {member}")
+                                        except Exception as e:
+                                            print(f"[Group:{group_name}] Failed to broadcast user_lookup_request for {member}: {e}")
+                                    else:
+                                        print(f"[Group:{group_name}] Member {member} not found in database")
+                                        write_log(f"[Group:{group_name}] Member {member} not found in database")
                                 
                             print(f"[{name}] ➜ [Group:{group_name}] : {content}")
                         else:
@@ -991,6 +1027,7 @@ def handle_client(conn, addr, name):
 
     print(f"{name} disconnected")
     write_log(f"[User][{name}] disconnected.")
+    write_log(f"[User][{name}] IP {client_ip_table.get(name, 'unknown')} released")
     conn.close()
     if name in clients:
         del clients[name]
@@ -1046,48 +1083,94 @@ def receive_message_from_peer(msg):
 
 # 处理server 连接
 def server_peer_listener():
-    """监听其他 server 的连接"""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind((HOST, SERVER_PORT))
-        s.listen()
+    """监听其他 server 的连接和广播消息"""
+    # TCP监听器用于普通消息
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as tcp_sock:
+        tcp_sock.bind((HOST, SERVER_PORT))
+        tcp_sock.listen()
         print(f"[Server] Listening for server peers on {HOST}:{SERVER_PORT}...")
-        while True:
-            conn, addr = s.accept()
-            try:
-                data = conn.recv(MAX_PLAINTEXT_LEN)
-                msg = aes_decrypt(data)
+        
+        # UDP监听器用于广播消息
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as udp_sock:
+            udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            udp_sock.bind((HOST, SERVER_PORT))
+            print(f"[Server] Listening for broadcast messages on {HOST}:{SERVER_PORT}...")
+            
+            # 使用select来处理多个socket
+            import select
+            sockets = [tcp_sock, udp_sock]
+            
+            while True:
+                readable, _, _ = select.select(sockets, [], [], 1.0)
                 
-                # 处理在线用户请求
-                if msg.get("type") == "online_user_request":
-                    user_list = list(clients.keys())
-                    resp = {
-                        "type": "online_user_response",
-                        "server_id": SERVER_ID,
-                        "online_users": user_list
-                    }
-                    conn.sendall(aes_encrypt(resp))
-                
-                # 处理用户查找请求
-                elif msg.get("type") == "user_lookup_request":
-                    response = user_manager.handle_user_lookup_request(msg, clients, SERVER_ID)
-                    if response:
-                        conn.sendall(aes_encrypt(response))
-                
-                # 处理用户查找响应
-                elif msg.get("type") == "user_lookup_response":
-                    peer_server_info = {
-                        "server_ip": addr[0],
-                        "server_port": addr[1]
-                    }
-                    user_manager.handle_user_lookup_response(msg, external_clients, peer_server_info)
-                
-                # 处理其他消息
-                else:
-                    receive_message_from_peer(msg)
+                for sock in readable:
+                    if sock == tcp_sock:
+                        # 处理TCP连接
+                        try:
+                            conn, addr = sock.accept()
+                            data = conn.recv(MAX_PLAINTEXT_LEN)
+                            msg = aes_decrypt(data)
+                            
+                            # 处理在线用户请求
+                            if msg.get("type") == "online_user_request":
+                                user_list = list(clients.keys())
+                                resp = {
+                                    "type": "online_user_response",
+                                    "server_id": SERVER_ID,
+                                    "online_users": user_list
+                                }
+                                conn.sendall(aes_encrypt(resp))
+                            
+                            # 处理用户查找请求
+                            elif msg.get("type") == "user_lookup_request":
+                                response = user_manager.handle_user_lookup_request(msg, clients, SERVER_ID)
+                                if response:
+                                    conn.sendall(aes_encrypt(response))
+                            
+                            # 处理用户查找响应
+                            elif msg.get("type") == "user_lookup_response":
+                                peer_server_info = {
+                                    "server_ip": addr[0],
+                                    "server_port": addr[1]
+                                }
+                                user_manager.handle_user_lookup_response(msg, external_clients, peer_server_info)
+                            
+                            # 处理其他消息
+                            else:
+                                receive_message_from_peer(msg)
+                                
+                        except Exception as e:
+                            print(f"[Server] TCP connection failed: {e}")
+                            if 'conn' in locals():
+                                conn.close()
                     
-            except Exception as e:
-                print(f"[Server] Peer handshake failed: {e}")
-                conn.close()
+                    elif sock == udp_sock:
+                        # 处理UDP广播消息
+                        try:
+                            data, addr = sock.recvfrom(MAX_PLAINTEXT_LEN)
+                            msg = aes_decrypt(data)
+                            
+                            # 只处理来自其他服务器的广播消息
+                            if addr[0] != HOST:
+                                # 处理用户查找请求
+                                if msg.get("type") == "user_lookup_request":
+                                    response = user_manager.handle_user_lookup_request(msg, clients, SERVER_ID)
+                                    if response:
+                                        # 添加服务器信息到响应中
+                                        response["server_ip"] = HOST
+                                        response["server_port"] = SERVER_PORT
+                                        
+                                        # 通过TCP发送响应
+                                        try:
+                                            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as response_sock:
+                                                response_sock.connect((addr[0], SERVER_PORT))
+                                                response_sock.sendall(aes_encrypt(response))
+                                                print(f"[Server] Sent user_lookup_response to {addr[0]}:{SERVER_PORT}")
+                                        except Exception as e:
+                                            print(f"[Server] Failed to send response to {addr[0]}: {e}")
+                                
+                        except Exception as e:
+                            print(f"[Server] UDP message processing failed: {e}")
 
 
 # 检测name与passwd是否一致
@@ -1106,6 +1189,11 @@ def login_check(name, passwd):
 def name_check(name):
     # 检查本地注册的用户
     if name in client_accounts:
+        return True
+    
+    # 检查数据库中的用户
+    user_info = user_manager.get_user_info(name)
+    if user_info:
         return True
     
     # 检查在线用户（包括其他服务器的用户）
@@ -1149,6 +1237,7 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
     s.listen()
     print(f"[Server] Listening on {HOST}:{PORT}...")
     write_log(f"[Server] Listening on {HOST}:{PORT}...")
+    write_log(f"[Server] Using CockroachDB database")
 
     while True:
         conn, addr = s.accept()
@@ -1221,6 +1310,7 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                         }
                         conn.sendall(aes_encrypt(success_msg))
                         auth_bool = True
+                        write_log(f"[User][{name}] login successful")
                     elif login_result == False:
                         # 发送密码错误消息
                         error_msg = {
@@ -1280,6 +1370,8 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                     # 建立连接
                     clients[name] = conn
                     auth_bool = True
+                    # 注册用户到数据库（在handle_client中会再次调用，这里只是确保用户存在）
+                    write_log(f"[User][{name}] registered successfully")
                 elif name_result == True:
                     # 发送用户名已存在消息
                     error_msg = {
