@@ -90,6 +90,18 @@ groups = {}
 # user_groups 结构: {user_name: [group_names]}
 user_groups = {}
 
+def write_log(message, log_file='log.txt'):
+    """
+    将一条日志信息追加写入到文件中，如果文件不存在则自动创建。
+
+    :param message: 要记录的日志内容（字符串）
+    :param log_file: 日志文件路径（默认是 log.txt）
+    """
+    message = f"[{datetime.now().isoformat()}] {message}"
+    
+    with open(log_file, 'a', encoding='utf-8') as f:
+        f.write(message + '\n')
+
 # ==== 初始化数据库和用户管理器 ====
 db_manager = DatabaseManagerCockroachDB()
 user_manager = UserManager(db_manager)
@@ -1212,20 +1224,6 @@ def name_check(name):
     else:
         #name不存在
         return False
-
-
-
-def write_log(message, log_file='log.txt'):
-    """
-    将一条日志信息追加写入到文件中，如果文件不存在则自动创建。
-
-    :param message: 要记录的日志内容（字符串）
-    :param log_file: 日志文件路径（默认是 log.txt）
-    """
-    message = f"[{datetime.now().isoformat()}] {message}"
-    
-    with open(log_file, 'a', encoding='utf-8') as f:
-        f.write(message + '\n')
 
 
 
