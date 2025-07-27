@@ -372,21 +372,21 @@ def handle_client(conn, addr, name):
             try:
                 msg = aes_decrypt(data)
 
-                #=================== 检查msg 是否被篡改 ===================
-                #safety clearance
-                msg['from'] = name #prevent impersonate someone
-                #print(msg['payload'])
-                msg['payload']=msg['payload'][:1000] # truncate the message to avoid overflow
-                #print(msg['payload'])
-                print("RAW JSON:", data.decode())
-                parse_and_validate_message(json.dumps(msg))
-                datetime.fromisoformat(msg['timestamp']) # ensure the format is not tampered
-                allowed_fields = ["nonce","from", "to", "payload", "payload_type", "timestamp", "type", "to_type", "content", "content_type", "payload_id", "file_path"]
-                for field_index in msg.keys():
-                    if field_index in allowed_fields:
-                        pass
-                    else:
-                        raise Exception("unallowed field found!!")
+                # #=================== 检查msg 是否被篡改 ===================
+                # #safety clearance
+                # msg['from'] = name #prevent impersonate someone
+                # #print(msg['payload'])
+                # msg['payload']=msg['payload'][:1000] # truncate the message to avoid overflow
+                # #print(msg['payload'])
+                # print("RAW JSON:", data.decode())
+                # parse_and_validate_message(json.dumps(msg))
+                # datetime.fromisoformat(msg['timestamp']) # ensure the format is not tampered
+                # allowed_fields = ["nonce","from", "to", "payload", "payload_type", "timestamp", "type", "to_type", "content", "content_type", "payload_id", "file_path"]
+                # for field_index in msg.keys():
+                #     if field_index in allowed_fields:
+                #         pass
+                #     else:
+                #         raise Exception("unallowed field found!!")
                 
                 payload = msg.get('payload', '')
                 payload_type = msg.get('payload_type', '')
