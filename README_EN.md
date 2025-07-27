@@ -85,8 +85,7 @@ This mode supports cross-server message delivery, suitable for distributed deplo
 #### Features:
 - Cross-server user lookup
 - Cross-server message delivery
-- Cross-server group chat
-- Automatic server discovery
+- Cross-server group chat （Can not implement because there is not enough protocol rules to achieve this function）
 
 #### Network Structure:
 ```
@@ -143,6 +142,7 @@ This mode uses CockroachDB database, suitable for production environment deploym
 - `/list` - View online users
 - `/msg <username> <message>` - Send private message
 - `/msg_file <username> <file_path>` - Send file
+- `/history` - Show sent and received messages
 
 ### Group Commands
 - `/create_group <group_name>` - Create group
