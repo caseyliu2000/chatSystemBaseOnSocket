@@ -12,6 +12,98 @@ ZEYU LIU
 
 这是一个基于Python的分布式聊天系统，支持本地和跨服务器的消息传递。系统包含三种不同的部署模式，满足不同的使用场景。
 
+## 安装和设置
+
+### 前置要求
+- Python 3.7+ (推荐 Python 3.12)
+- 系统已安装 Conda 或 Miniconda
+- Git (用于克隆仓库)
+
+### 方法一：使用 Conda (推荐)
+
+1. **克隆仓库**
+   ```bash
+   git clone <仓库地址>
+   cd chatSystemBasicCursor
+   ```
+
+2. **创建并激活 conda 环境**
+   ```bash
+   conda env create -f environment.yml
+   conda activate chatSocket
+   ```
+
+3. **验证安装**
+   ```bash
+   python --version
+   conda list
+   ```
+
+### 方法二：使用 pip
+
+1. **克隆仓库**
+   ```bash
+   git clone <仓库地址>
+   cd chatSystemBasicCursor
+   ```
+
+2. **创建虚拟环境 (可选但推荐)**
+   ```bash
+   python -m venv chat_env
+   # Windows系统
+   chat_env\Scripts\activate
+   # macOS/Linux系统
+   source chat_env/bin/activate
+   ```
+
+3. **安装依赖包**
+   ```bash
+   pip install -r requirements_pip.txt
+   ```
+
+### 环境检查
+
+在启动系统之前，验证所有必需的包是否已安装：
+
+```bash
+python -c "
+import cryptography
+import psycopg2
+import pydantic
+import sqlalchemy
+import dotenv
+print('所有必需的包已成功安装！')
+"
+```
+
+如果任何导入失败，请重新安装缺失的包：
+```bash
+pip install <包名>
+```
+
+## 快速开始
+
+### 首次用户
+
+1. **安装系统** (见上面的安装和设置)
+2. **启动服务器**
+   ```bash
+   python server.py
+   ```
+3. **在新终端中启动客户端**
+   ```bash
+   python client.py
+   ```
+4. **按提示注册新用户**
+5. **启动另一个客户端** 测试用户间的消息传递
+
+### 开发者
+
+1. **设置开发环境** (见下面的开发环境设置)
+2. **在 `wg.env` 或 `.env` 中配置环境变量**
+3. **启用调试日志记录**
+4. **使用不同端口进行测试** 避免冲突
+
 ## 系统要求
 
 - Python 3.7+
@@ -197,6 +289,44 @@ ClientA ---- ServerA ---- ServerB ---- ClientB
 - `local_message_database_<用户名>.db` - 客户端消息历史
 
 ## 开发说明
+
+### 开发环境设置
+
+#### IDE 配置
+- **VS Code**: 安装 Python 扩展并将 Python 解释器设置为 conda 环境
+- **PyCharm**: 配置项目解释器使用 conda 环境
+- **Jupyter Notebook**: 为 conda 环境安装和配置
+
+#### 调试设置
+1. **启用调试日志记录**
+   ```python
+   import logging
+   logging.basicConfig(level=logging.DEBUG)
+   ```
+
+2. **开发环境变量**
+   在项目根目录创建 `.env` 文件：
+   ```env
+   DEBUG=True
+   LOG_LEVEL=DEBUG
+   ```
+
+3. **数据库调试**
+   - 对于 SQLite：检查 `local_message_database_<用户名>.db` 文件
+   - 对于 CockroachDB：使用 CockroachDB 管理界面或 CLI 工具
+
+#### 代码质量工具
+安装开发依赖：
+```bash
+pip install bandit  # 安全代码检查
+pip install black   # 代码格式化
+pip install flake8  # 代码检查
+```
+
+#### 测试环境
+- 使用单独的测试数据库
+- 为单元测试模拟外部服务
+- 使用不同端口进行测试避免冲突
 
 ### 项目结构
 ```
