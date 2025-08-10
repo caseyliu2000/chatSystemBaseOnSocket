@@ -1,0 +1,30 @@
+annotated-types @ file:///C:/b/abs_0dmaoyhhj3/croot/annotated-types_1709542968311/work
+bandit==1.8.6
+bcrypt @ file:///C:/b/abs_b3ok3jhxrx/croot/bcrypt_1747402791004/work
+cffi @ file:///C:/b/abs_29_b57if3f/croot/cffi_1736184144340/work
+click @ file:///C:/b/abs_42rbjngfys/croot/click_1744271606983/work
+cockroachdb==0.3.5
+colorama @ file:///C:/Users/dev-admin/perseverance-python-buildout/croot/colorama_1699472650914/work
+cryptography @ file:///C:/b/abs_cbo_0az6za/croot/cryptography_1753084589654/work
+greenlet @ file:///C:/b/abs_bbl_18a2tm/croot/greenlet_1733860081977/work
+markdown-it-py==3.0.0
+mdurl==0.1.2
+pbr==6.1.1
+psycopg2 @ file:///C:/b/abs_a4bewkfd4i/croot/psycopg2_1744919806261/work
+psycopg2-binary==2.9.10
+pyClamd==0.4.0
+pycparser @ file:///tmp/build/80754af9/pycparser_1636541352034/work
+pycryptodome @ file:///C:/b/abs_79emxjlcaj/croot/pycryptodome_1737042221951/work
+pydantic @ file:///C:/b/abs_d1rp6fqxgk/croot/pydantic_1750768285689/work
+pydantic_core @ file:///C:/b/abs_d0xs0z3erk/croot/pydantic-core_1750754747982/work
+Pygments==2.19.2
+python-dotenv @ file:///C:/b/abs_71cpoh9hpg/croot/python-dotenv_1745613639902/work
+python-magic-bin==0.4.14
+PyYAML==6.0.2
+rich==14.1.0
+setuptools==78.1.1
+SQLAlchemy @ file:///C:/b/abs_01jvxay_0k/croot/sqlalchemy_1752524450450/work
+stevedore==5.4.1
+typing-inspection @ file:///C:/b/abs_261c5jt6kx/croot/typing-inspection_1746023491500/work
+typing_extensions @ file:///C:/b/abs_0ffjxtihug/croot/typing_extensions_1734714875646/work
+wheel==0.45.1

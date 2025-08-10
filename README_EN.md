@@ -6,103 +6,10 @@ HARRY HUNG JUN WONG
 SIJIN YANG
 ZEYU LIU
 # Chat Server Usage Guide
--Chinese readme please read README_CN.md
 
 ## Project Overview
 
 This is a Python-based distributed chat system that supports local and cross-server message delivery. The system includes three different deployment modes to meet various usage scenarios.
-
-## Installation and Setup
-
-### Prerequisites
-- Python 3.7+ (Python 3.12 recommended)
-- Conda or Miniconda installed on your system
-- Git (for cloning the repository)
-
-### Method 1: Using Conda (Recommended)
-
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd chatSystemBasicCursor
-   ```
-
-2. **Create and activate conda environment**
-   ```bash
-   conda env create -f environment.yml
-   conda activate chatSocket
-   ```
-
-3. **Verify installation**
-   ```bash
-   python --version
-   conda list
-   ```
-
-### Method 2: Using pip
-
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd chatSystemBasicCursor
-   ```
-
-2. **Create virtual environment (optional but recommended)**
-   ```bash
-   python -m venv chat_env
-   # On Windows
-   chat_env\Scripts\activate
-   # On macOS/Linux
-   source chat_env/bin/activate
-   ```
-
-3. **Install dependencies**
-   ```bash
-   pip install -r requirements_pip.txt
-   ```
-
-### Environment Check
-
-Before starting the system, verify that all required packages are installed:
-
-```bash
-python -c "
-import cryptography
-import psycopg2
-import pydantic
-import sqlalchemy
-import dotenv
-print('All required packages are installed successfully!')
-"
-```
-
-If any import fails, reinstall the missing package:
-```bash
-pip install <package_name>
-```
-
-## Quick Start
-
-### For First-Time Users
-
-1. **Install the system** (see Installation and Setup above)
-2. **Start the server**
-   ```bash
-   python server.py
-   ```
-3. **Start a client in a new terminal**
-   ```bash
-   python client.py
-   ```
-4. **Register a new user** when prompted
-5. **Start another client** to test messaging between users
-
-### For Developers
-
-1. **Set up development environment** (see Development Environment Setup below)
-2. **Configure environment variables** in `wg.env` or `.env`
-3. **Run with debug logging** enabled
-4. **Use different ports** for testing to avoid conflicts
 
 ## System Requirements
 
@@ -288,44 +195,6 @@ This mode uses CockroachDB database, suitable for production environment deploym
 - `local_message_database_<username>.db` - Client message history
 
 ## Development Notes
-
-### Development Environment Setup
-
-#### IDE Configuration
-- **VS Code**: Install Python extension and set Python interpreter to the conda environment
-- **PyCharm**: Configure project interpreter to use the conda environment
-- **Jupyter Notebook**: Install and configure for the conda environment
-
-#### Debugging Setup
-1. **Enable debug logging**
-   ```python
-   import logging
-   logging.basicConfig(level=logging.DEBUG)
-   ```
-
-2. **Environment variables for development**
-   Create a `.env` file in the project root:
-   ```env
-   DEBUG=True
-   LOG_LEVEL=DEBUG
-   ```
-
-3. **Database debugging**
-   - For SQLite: Check `local_message_database_<username>.db` files
-   - For CockroachDB: Use CockroachDB admin UI or CLI tools
-
-#### Code Quality Tools
-Install development dependencies:
-```bash
-pip install bandit  # Security linting
-pip install black   # Code formatting
-pip install flake8  # Code linting
-```
-
-#### Testing Environment
-- Use separate test databases
-- Mock external services for unit tests
-- Use different ports for testing to avoid conflicts
 
 ### Project Structure
 ```
