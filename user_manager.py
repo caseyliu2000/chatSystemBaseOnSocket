@@ -1,3 +1,11 @@
+'''
+Group 9
+CHI KEI LAO
+GUO YIN HE
+HARRY HUNG JUN WONG
+SIJIN YANG
+ZEYU LIU
+'''
 import socket
 import struct
 from datetime import datetime

@@ -1,4 +1,12 @@
- # 聊天服务器使用指南
+
+# Group 9 Members
+CHI KEI LAO
+GUO YIN HE
+HARRY HUNG JUN WONG
+SIJIN YANG
+ZEYU LIU
+
+# 聊天服务器使用指南
 
 ## 项目概述
 

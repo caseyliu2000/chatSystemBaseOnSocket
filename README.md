@@ -1,3 +1,10 @@
+
+# Group 9 Members
+CHI KEI LAO
+GUO YIN HE
+HARRY HUNG JUN WONG
+SIJIN YANG
+ZEYU LIU
 # Chat Server Usage Guide
 -Chinese readme please read README_CN.md
 
