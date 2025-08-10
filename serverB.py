@@ -45,7 +45,7 @@ PORT_SERVER: 65000 #部署时，只需改成规定的server port即可
 # PORT=int(os.getenv("PORT_CLIENT"))#client port
 # SERVER_PORT=int(os.getenv("PORT_SERVER"))#server port
 # 本地 test
-SERVER_ID = "serverA"
+SERVER_ID = "serverB"
 HOST = "127.0.0.1"
 PORT=65433#client port
 SERVER_PORT=65001#server port
